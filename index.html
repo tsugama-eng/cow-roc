@@ -203,8 +203,7 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; background: #fafafa; padding: 15px; border-radius: 6px; border: 1px solid #e1e8ed; align-items: center; box-sizing: border-box;">
             <div>
                 <label for="riboSpeciesSelect" style="font-size: 12px; font-weight: bold; color: #444; display: block; margin-bottom: 4px;">🔬 Select Ribo-seq Organism Dataset:</label>
-                <select id="riboSpeciesSelect" onchange="loadIndependentRiboData(this.value)" style="margin-top: 0; padding: 8px; width: 100%; max-width: 320px; box-sizing: border-box;">
-                    <option value="Arabidopsis_thaliana">Arabidopsis thaliana (Thale cress) </option>
+                <select id="riboSpeciesSelect" onchange="updateRiboBrowser();" style="margin-top: 0; padding: 8px; width: 100%; max-width: 320px; box-sizing: border-box;">                    <option value="Arabidopsis_thaliana">Arabidopsis thaliana (Thale cress) </option>
                     <option value="Oryza_sativa">Oryza sativa (Rice) </option>
                     <option value="Homo_sapiens" selected>Homo sapiens (Human) </option>
                     <option value="Mus_musculus">Mus musculus (Mouse) </option>
@@ -914,10 +913,6 @@
 
     function getRiboDataFilePath(speciesKey) {
         return "ribo-seq/" + speciesKey + "_ribo-seq-weighted_codon_frequencies.tsv";
-    }
-
-    function loadIndependentRiboData(val) {
-        updateRiboBrowser();
     }
 
     function fetchAndRegisterRiboData(speciesKey) {
