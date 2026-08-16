@@ -1,6 +1,5 @@
 # COW-ROC:
-
-##Codon weight and ribosome-occupied codon utilization platform
+## Codon weight and ribosome-occupied codon utilization platform
 
 ## 📌 Quick Platform Overview
 *   **Section 1 (Codon Optimization Engine):** Engineers and synthesizes open reading frames using pre-calculated or custom codon weight models.
