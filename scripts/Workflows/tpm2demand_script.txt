@@ -1,0 +1,193 @@
+#After downloading all the TPM and CDS data
+
+#Checking completeness of the species
+
+#To get onion CDSs, which were not available in the original data from figshare
+seqkit seq -w 60 Allium_cepa_DHW30006.final_dna.toplevel.fa.gz > Allium_cepa_DHW30006.final_fixed_dna.toplevel.fa
+gffread Allium_cepa_DHW30006.final.gff3 -g Allium_cepa_DHW30006.final_fixed_dna.toplevel.fa -x Allium_cepa_DHW30006.cds.fa
+
+cd TPM
+filenum=0
+for i in Oryza_sativa Triticum_aestivum Zea_mays Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Asparagus_officinalis Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do if [ -f ${i}*.txt ]; then filenum=$((filenum + 1)); fi; done
+echo $filenum #27, which is OK
+cd ..
+
+cd CDS
+filenum=0
+for i in Oryza_sativa Triticum_aestivum Zea_mays Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Asparagus_officinalis Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do if [ -f ${i}*.fa.gz ]; then filenum=$((filenum + 1)); fi; done
+echo $filenum #27, which is OK
+
+#Checking the format of the sequence ID of the CDS and TPM files
+for i in *.fa.gz; do gunzip $i; done
+
+for i in *.fa; do head -100 $i; done
+
+cd ../TPM
+for i in *.txt; do head -10 $i; done
+
+perl -nle 'if($.==1){s/Geneid/SeqID/; s/\t/\tCenchrus_americanus_/g; print;} else {print;}' Cenchrus_americanus_all_gene_tpm_new_REF_KK.txt > Cenchrus_americanus_all_gene_tpm.txt
+rm Cenchrus_americanus_all_gene_tpm_new_REF_KK.txt
+perl -nle 'if($.==1){s/transcript_id/SeqID/; s/\t/\tOryza_sativa_/g; s/\tOryza_sativa_[^\t]+?$//; print;} else {s/\t[^\t]+?$//; print;}' Oryza_sativa_osa1_r7.all_models.tpm_matrix.txt > Oryza_sativa_osa1_r7.all_models.tpm.txt
+rm Oryza_sativa_osa1_r7.all_models.tpm_matrix.txt
+perl -nle 'if($.==1){s/Hv_/Hordeum_vulgare_/g; s/_PRJ\w+?_/_/g; print;} else {print;}' Hordeum_vulgare_all_gene_tpm0.txt > Hordeum_vulgare_all_gene_tpm.txt
+rm Hordeum_vulgare_all_gene_tpm0.txt
+perl -nle 'if($.==1){s/Wheat_/Triticum_aestivum_/g; s/_PRJ\w+?_/_/g; print;} else {print;}' Triticum_aestivum_all_gene_tpm0.txt > Triticum_aestivum_all_gene_tpm.txt
+rm Triticum_aestivum_all_gene_tpm0.txt
+perl -nle 'if($.==1){s/Zm_/Zea_mays_/g; s/_PRJ\w+?_/_/g; print;} else {print;}' Zea_mays_all_gene_tpm0.txt > Zea_mays_all_gene_tpm.txt
+rm Zea_mays_all_gene_tpm0.txt
+perl -nle 'if($.==1){s/Hs_/Homo_sapiens_/g; print;} else {print;}' Homo_sapiens_all_gene_tpm0.txt > Homo_sapiens_all_gene_tpm.txt
+rm Homo_sapiens_all_gene_tpm0.txt
+perl -nle 'if($.==1){s/Mm_/Mus_musculus_/g; print;} else {print;}' Mus_musculus_all_gene_tpm0.txt > Mus_musculus_all_gene_tpm.txt
+rm Mus_musculus_all_gene_tpm0.txt
+perl -nle 'if($.==1){s/Sc_/Saccharomyces_cerevisiae_/g; print;} else {print;}' Saccharomyces_cerevisiae_all_gene_tpm0.txt > Saccharomyces_cerevisiae_all_gene_tpm.txt
+rm Saccharomyces_cerevisiae_all_gene_tpm0.txt
+
+
+#Extracting "gene:[^ ]+ " will be good
+
+cd CDS
+mkdir codon_num_in_CDSs
+for i in *.fa; do perl ../cds_codon_analysis.pl $i > codon_num_in_CDSs/$i.codon_num.txt; done
+
+mkdir codon_freq_in_CDSs
+for i in *.fa; do perl ../cds_codon_analysis.pl -n $i > codon_freq_in_CDSs/$i.codon_freq.txt; done
+
+mkdir RSCU_in_CDSs
+for i in *.fa; do perl ../cds_codon_analysis.pl -r $i > RSCU_in_CDSs/$i.rscu.txt; done
+
+#For human and mouse
+for i in Homo_sapiens*.fa Mus_musculus*.fa
+do
+  perl ../cds_codon_analysis.pl $i > codon_num_in_CDSs/$i.codon_num0.txt
+  perl ../cds_codon_analysis.pl -n $i > codon_freq_in_CDSs/$i.codon_freq0.txt
+  perl ../cds_codon_analysis.pl -r $i > RSCU_in_CDSs/$i.rscu0.txt
+done
+
+#for onion and sorghum
+for i in Allium_cepa Oryza_sativa #Sorghum_bicolor
+do
+  perl ../cds_codon_analysis.pl $i*.fa > codon_num_in_CDSs/$i.codon_num.txt
+  perl ../cds_codon_analysis.pl -n $i*.fa > codon_freq_in_CDSs/$i.codon_freq.txt
+  perl ../cds_codon_analysis.pl -r $i*.fa > RSCU_in_CDSs/$i.rscu.txt
+done
+
+mkdir codon_demands
+mkdir normalized_codon_demands
+mkdir codon_demand_RSCU
+
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Asparagus_officinalis Ananas_comosus Musa_acuminata Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do
+  perl ../codon_demand_analysis.pl codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > codon_demands/${i}_codon_demands.txt
+  perl ../codon_demand_analysis.pl -n codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > normalized_codon_demands/${i}_normalized_codon_demands.txt
+  perl ../codon_demand_analysis.pl -r codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > codon_demand_RSCU/${i}_codon_demand_rscu.txt
+done
+
+#codon_num.txt files for human and mouse had the postfix numbers corresponding to transcript variants and incompatible with the above
+#The names of these files were manually changed to ... codon_num0.txt
+#To make the above work
+for i in Homo_sapiens Mus_musculus
+do
+  input=`ls codon_num_in_CDSs/$i*0.txt`
+  output=`echo $input|perl -pe 's/0\.txt/.txt/;'`
+  perl -nle 'if(/^gene:[^\t]+\.\d+\t/){s/^(gene:[^\t]+)\.\d+?\t/$1\t/; print;} else {print;}' $input > $output
+  input=`ls codon_freq_in_CDSs/$i*0.txt`
+  output=`echo $input|perl -pe 's/0\.txt/.txt/;'`
+  perl -nle 'if(/^gene:[^\t]+\.1\t/){s/^(gene:[^\t]+)\.\d+?\t/$1\t/; print;} else {print;}' $input > $output
+  input=`ls RSCU_in_CDSs/$i*0.txt`
+  output=`echo $input|perl -pe 's/0\.txt/.txt/;'`
+  perl -nle 'if(/^gene:[^\t]+\.1\t/){s/^(gene:[^\t]+)\.\d+?\t/$1\t/; print;} else {print;}' $input > $output
+done
+
+for i in Homo_sapiens Mus_musculus Oryza_sativa Zea_mays Escherichia_coli Allium_cepa Brassica_rapa Sorghum_bicolor
+do
+  perl ../codon_demand_analysis.pl codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > codon_demands/${i}_codon_demands.txt
+  perl ../codon_demand_analysis.pl -n codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > normalized_codon_demands/${i}_normalized_codon_demands.txt
+  perl ../codon_demand_analysis.pl -r codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt > codon_demand_RSCU/${i}_codon_demand_rscu.txt
+done
+
+#Combining data for all the species
+awk 'NR==1{print;}' codon_demands/Arabidopsis_thaliana_codon_demands.txt > codon_demands/all_species_codon_demands.txt
+awk 'NR==1{print;}' normalized_codon_demands/Arabidopsis_thaliana_normalized_codon_demands.txt > normalized_codon_demands/all_species_normalized_codon_demands.txt
+awk 'NR==1{print;}' codon_demand_RSCU/Arabidopsis_thaliana_codon_demand_rscu.txt > codon_demand_RSCU/all_species_codon_demand_rscu.txt
+
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do
+  tail -1 codon_num_in_CDSs/$i*.codon_num.txt | perl -aF"\t" -snle '$F[0] =~ s/^all/${species}_all_codon_num/; print join ("\t", @F[0..64, $#F])' -- -species=$i >> codon_demands/all_species_codon_demands.txt
+  awk 'NR>1{print;}' codon_demands/${i}_codon_demands.txt >> codon_demands/all_species_codon_demands.txt
+  tail -1 codon_freq_in_CDSs/$i*.codon_freq.txt | perl -aF"\t" -snle '$F[0] =~ s/^all/${species}_all_codon_freq/; print join ("\t", @F[0..64, $#F])' -- -species=$i >> normalized_codon_demands/all_species_normalized_codon_demands.txt
+  awk 'NR>1{print;}' normalized_codon_demands/${i}_normalized_codon_demands.txt >> normalized_codon_demands/all_species_normalized_codon_demands.txt
+  tail -1 RSCU_in_CDSs/$i*.rscu.txt | perl -aF"\t" -snle '$F[0] =~ s/^all/${species}_all_rscu/; print join ("\t", @F[0..64, $#F])' -- -species=$i >> codon_demand_RSCU/all_species_codon_demand_rscu.txt
+  awk 'NR>1{print;}' codon_demand_RSCU/${i}_codon_demand_rscu.txt >> codon_demand_RSCU/all_species_codon_demand_rscu.txt
+done
+
+#Obtaining normalized codon frequency data for all the species (to easily get GC contents in CDSs)
+awk 'NR==1{print;}' codon_freq_in_CDSs/Oryza_sativa*.codon_freq.txt > codon_freq_in_CDSs/all_species_codon_freq_w_GC_in_CDSs.txt
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do tail -1 codon_freq_in_CDSs/$i*.codon_freq.txt | perl -s -pe 's/all/${species}_all/;' -- -species=$i; done  >> codon_freq_in_CDSs/all_species_codon_freq_w_GC_in_CDSs.txt
+
+awk 'NR==1{print;}' RSCU_in_CDSs/Oryza_sativa*.rscu.txt > RSCU_in_CDSs/all_species_rscu_in_CDSs.txt
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do tail -1 RSCU_in_CDSs/$i*.rscu.txt | perl -s -pe 's/all/${species}_all/;' -- -species=$i; done  >> RSCU_in_CDSs/all_species_rscu_in_CDSs.txt
+
+#Obtaining the CDS numbers and RNA-Seq data used
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do
+  printf "$i\t"
+  cds_num=`expr $(wc -l < codon_freq_in_CDSs/$i*.codon_freq.txt) - 1`
+  rnaseq_num=`expr $(wc -l < codon_demands/${i}_codon_demands.txt) - 1`
+  printf "${cds_num}\t${rnaseq_num}\n"
+done > num_CDSs_RNA-Seq_data.txt
+
+mkdir ../DT_PCA
+cp codon_demands/all_species_codon_demands.txt normalized_codon_demands/all_species_normalized_codon_demands.txt codon_demand_RSCU/all_species_codon_demand_rscu.txt ../DT_PCA/
+cp codon_freq_in_CDSs/all_species_codon_freq_w_GC_in_CDSs.txt RSCU_in_CDSs/all_species_rscu_in_CDSs.txt num_CDSs_RNA-Seq_data.txt ../DT_PCA/
+
+#For mouse tRNA data
+cd DT_PCA
+perl -e '
+%codon;
+%rpm;
+$linenum=0;
+while($line = <>){
+  $linenum++;
+  if($linenum == 1) {print $line; next;}
+  $line=~s/[\r\n]+//;
+  @F = split("\t", $line);
+  if(!$rpm{$F[1]}){
+    $codon{$F[1]} = $F[2];
+    $rpm{$F[1]} = join("\t", @F[3..$#F]);
+  } else {
+    @rpmdata = split("\t", $rpm{$F[1]}); 
+    for $i (0..$#rpmdata) {
+      $rpmdata[$i] = $rpmdata[$i] + $F[$i+3];
+    }
+    $rpm{$F[1]} = join("\t", @rpmdata);
+  }
+}
+for $i (sort keys %rpm) {
+  $type = $i;
+  $type =~ s/-\d+$//;
+  print "$i\t$type\t$codon{$i}\t$rpm{$i}\n";
+}
+' Mus_musculus_tRNA_RPM.txt > Mus_musculus_tRNA_RPM_mod.txt
+#Sup-tRNA (corresponding to stop codon) was manually removed
+
+for i in Arabidopsis_thaliana Oryza_sativa Mus_musculus
+do perl -s -pe 's/^/${spc}\t/;' -- -spc=$i $i*tRNA*.txt; done > all_tRNA_RPM.txt
+
+#Human tRNA gene number and expression data were made by manually combining the data from GSE186736_tissues_anticodon_RPM_full-length_tRNA.csv (for expression)
+
+##################################
+#To look at human and mouse data
+for i in Homo_sapiens
+do perl ../codon_demand_analysis.pl codon_num_in_CDSs/$i*.codon_num.txt ../TPM/$i*tpm.txt -g SRR15513227 #-g option value should be written last
+done
+
+#######################################
+#To get codon frequencies from the Cas9 variants from Nanasato et al. 2024 Plant Biotechnol (https://doi.org/10.5511/plantbiotechnology.24.0709a)
+cd CDS
+../cds_codon_analysis.pl -n Cas9_codon_variants_Nanasato_et_al_2024_Plant_Biotech.fa > Cas9_codon_variants_Nanasato_et_al_2024_Plant_Biotech.codon_freq.txt
+
+

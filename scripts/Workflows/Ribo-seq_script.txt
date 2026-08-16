@@ -1,0 +1,826 @@
+source /home/dt/ribo_project/venv_ribo/bin/activate
+
+wget https://ftp.ebi.ac.uk/ensemblgenomes/pub/release-62/plants/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.62.gtf.gz
+wget https://ftp.ebi.ac.uk/ensemblgenomes/pub/release-62/plants/gtf/oryza_sativa/Oryza_sativa.IRGSP-1.0.62.gtf.gz
+wget https://ftp.ensembl.org/pub/release-115/gtf/homo_sapiens/Homo_sapiens.GRCh38.115.gtf.gz
+wget https://ftp.ensembl.org/pub/release-115/gtf/mus_musculus/Mus_musculus.GRCm39.115.gtf.gz
+wget https://ftp.ensemblgenomes.ebi.ac.uk/pub/bacteria/release-62/gtf/bacteria_12_collection/escherichia_coli_gca_001606525/Escherichia_coli_gca_001606525.ASM160652v1.62.gtf.gz
+wget https://ftp.ensemblgenomes.ebi.ac.uk/pub/fungi/release-62/gtf/saccharomyces_cerevisiae/Saccharomyces_cerevisiae.R64-1-1.62.gtf.gz
+wget https://ftp.ensemblgenomes.ebi.ac.uk/pub/metazoa/release-62/gtf/drosophila_melanogaster/Drosophila_melanogaster.BDGP6.54.62.gtf.gz
+
+gunzip Arabidopsis_thaliana.TAIR10.62.gtf.gz Oryza_sativa.IRGSP-1.0.62.gtf.gz Homo_sapiens.GRCh38.115.gtf.gz Mus_musculus.GRCm39.115.gtf.gz
+gunzip Escherichia_*.gtf.gz Saccharomyces_*.gtf.gz Drosophila_*.gtf.gz
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus Saccharomyces_cerevisiae Drosophila_melanogaster;do
+  grep -v '^#' $i*.gtf > temp.gtf
+  GTFupdate temp.gtf > fixed.gtf #This step improved the detection of the 3-b periodicity by metaplots
+  prepare_transcripts -g fixed.gtf -f $i*dna*toplevel.fa -o ${i}_RiboCode_annot
+  rm temp.gtf fixed.gtf
+done
+
+for i in Escherichia_coli; do
+  grep -v '^#' $i*.gtf | awk -F"\t" 'BEGIN{OFS="\t"} {
+    print $0; 
+    if($3=="CDS") {$3="exon"; print $0}
+  }' > temp_for_metaplot.gtf
+
+# 2. GTFupdateを「使わず」に直接 prepare_transcripts を実行
+# これにより、BAM内の染色体名（コロンあり）と一致したアノテーションができる
+  prepare_transcripts -g temp_for_metaplot.gtf -f $i*dna*toplevel.fa -o ${i}_RiboCode_annot
+  rm temp_for_metaplot.gtf
+done
+
+#For Arabidopsis organelle
+perl -nle 'if(/A[Tt]C[Gg]\d{5}/){print;}' Arabidopsis_thaliana.TAIR10.62.gtf > At_pt.TAIR10.62.gtf
+perl -nle 'if(/A[Tt]M[Gg]\d{5}/){print;}' Arabidopsis_thaliana.TAIR10.62.gtf > At_mt.TAIR10.62.gtf
+for i in pt mt; do
+  grep -v '^#' At_${i}.TAIR10.62.gtf > temp.gtf
+  GTFupdate temp.gtf > fixed.gtf #This step improved the detection of the 3-b periodicity by metaplots
+  prepare_transcripts -g fixed.gtf -f Arabidopsis_thaliana*dna*toplevel.fa -o At_${i}_RiboCode_annot
+  rm temp.gtf fixed.gtf
+done
+
+EXTERNAL_BAM_DIR="/media/dt/LaCie/codon_project_Ribo-seq/BAM"
+RESULT_DIR="/media/dt/LaCie/codon_project_Ribo-seq/RiboCode_Results"
+#mkdir -p $EXTERNAL_BAM_DIR $RESULT_DIR
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 3 && $1 !~ /^y/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'` # RNA or Ribo
+  
+  if [ ! -f ${species}*dna*.toplevel.fa ]
+  then
+    sspecies=`echo $species|perl -pe 'tr/A-Z/a-z/'`
+    baseurl1="https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-62"
+    baseurl2="https://ftp.ensemblgenomes.ebi.ac.uk/pub/metazoa/release-62"
+    genome1=`curl ${baseurl1}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds1=`curl ${baseurl1}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff1=`curl ${baseurl1}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    genome2=`curl ${baseurl2}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds2=`curl ${baseurl2}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff2=`curl ${baseurl2}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    wget $baseurl1/fasta/${sspecies}/dna/${genome1}
+    wget $baseurl1/fasta/${sspecies}/cds/${cds1}
+    wget $baseurl1/gff3/${sspecies}/${gff1}
+    wget $baseurl2/fasta/${sspecies}/dna/${genome2}
+    wget $baseurl2/fasta/${sspecies}/cds/${cds2}
+    wget $baseurl2/gff3/${sspecies}/${gff2}
+  fi
+  gunzip ${species}*dna*.toplevel.fa.gz ${species}*.gff3.gz
+
+  if [ ! -d ${species}_STAR_index ]; then
+    mkdir -p ${species}_STAR_index
+    if [ "$species" == "Homo_sapiens" ] || [ "$species" == "Mus_musculus" ]; then
+        SA_BASES=14
+    elif [ "$species" == "Oryza_sativa" ]; then
+        SA_BASES=13
+    elif [ "$species" == "Arabidopsis_thaliana" ] || [ "$species" == "Drosophila_melanogaster" ]; then
+        SA_BASES=12
+    elif [ "$species" == "Saccharomyces_cerevisiae" ]; then
+        SA_BASES=10 # 酵母用
+    elif [ "$species" == "Escherichia_coli" ]; then
+        SA_BASES=10 # 大腸菌用
+    else
+        # 未知の小型ゲノム用にさらに安全な値を設定
+        SA_BASES=10
+    fi
+    
+    cp /home/dt/Downloads/${species}*dna*.toplevel.fa ./
+    
+    STAR --runMode genomeGenerate --runThreadN 60 \
+         --genomeDir ${species}_STAR_index \
+         --genomeFastaFiles ${species}*dna*.toplevel.fa \
+         --sjdbGTFfile ${species}*.gtf \
+         --sjdbOverhang 100 \
+         --genomeSAindexNbases $SA_BASES
+  fi
+
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  submitter=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Submitter@acc`
+  ssubmitter=`echo $submitter|perl -pe 's/^(\w{6}).*/$1/'`
+
+  if [ ! -f ${sra}.sra ] && [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fi
+  if [ -f ${sra}.sra ] && [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    fasterq-dump -p -e 60 --split-files ${sra}.sra
+    rm ${sra}.sra
+  fi
+  if  [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_1.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_2.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_3.fastq.bz2"
+    pbzip2 -d -p60 ${sra}*.fastq.bz2
+  fi
+  if [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    prefetch ${sra}
+    fasterq-dump -e 60 -p --split-files ${sra}/${sra}.sra
+    rm -r ${sra}
+  fi
+  if [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    fasterq-dump -p --split-files ${sra}
+  fi
+  if [ -f ${sra}_1.fastq ] && [ -f ${sra}_2.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 3
+  elif [ -f ${sra}_2.fastq ] && [ -f ${sra}_3.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_2.fastq -o ${sra}_R1.fastq -I ${sra}_3.fastq -O ${sra}_R2.fastq -w 3
+  elif ([ -f ${sra}_1.fastq ] || [ -f ${sra}_2.fastq ] || [ -f ${sra}.fastq ]) && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 3
+  fi
+
+  if [ -f ${sra}_R.fastq ] || [ -f ${sra}_R1.fastq ]; then
+    echo "Mapping $sra with STAR..."
+    
+    # マッピング実行（1サンプルに60スレッド割り当て）
+    # Ribo-seqとRNA-seq両方に対応するため、TranscriptomeSAMを出力しておく
+    fastq_input="${sra}_R.fastq"
+    [ -f ${sra}_R1.fastq ] && fastq_input="${sra}_R1.fastq ${sra}_R2.fastq"
+
+    STAR --runThreadN 60 --genomeDir ${species}_STAR_index \
+       --readFilesIn $fastq_input --outFileNamePrefix ${species}_${sra}_ \
+       --outSAMtype BAM SortedByCoordinate --quantMode TranscriptomeSAM GeneCounts \
+       --limitBAMsortRAM 30000000000  # ← ここを追加（約30GB）
+
+    # 5. データ種別による分岐
+    if [ "$data_type" == "Ribo" ]; then
+      # --- Ribo-seqの場合: RiboCodeでコドン集計 ---
+      # RiboCodeの -g には、prepare_transcriptsで作った「ディレクトリ」を指定する
+      #metaplots -a ${species}_RiboCode_annot \
+      #    -r ${species}_${sra}_Aligned.toTranscriptome.out.bam \
+      #    -o ${species}_${sra}_config
+    　#RiboCode -a ${species}_RiboCode_annot \
+      #         -c ${species}_${sra}_config_pre_config.txt \
+      #        -o ${RESULT_DIR}/${species}_${sra}_ribocode
+      #Neither metaplots nor RiboCode worked in the initial trial and the loop given below was to fix it
+       
+    else
+      # --- RNA-seqの場合: featureCountsで遺伝子集計 ---
+      # STARの標準出力(GeneCounts)も使えるが、詳細設定のためfeatureCountsを実行
+      featureCounts -T 60 -g ID -t gene -a ${species}*.gff3 \
+                    -o ${RESULT_DIR}/${species}_${sra}_gene.count ${species}_${sra}_Aligned.sortedByCoord.out.bam
+      # TPM変換 (既存のcount2tpm.plを利用)
+      count2tpm.pl -g 1 -l 6 -c 7 ${RESULT_DIR}/${species}_${sra}_gene.count > ${RESULT_DIR}/${species}_${sra}_gene.tpm
+    fi
+
+    # 7. ファイル整理とBAMの外部移動
+    # 巨大なBAMを外部ストレージへ移動
+    mv ${species}_${sra}_Aligned.toTranscriptome.out.bam ${species}_${sra}_Aligned.sortedByCoord.out.bam ${EXTERNAL_BAM_DIR}/
+    # 不要な中間ファイル（ゲノム座標BAM等）を削除してディスクを空ける
+
+    rm -rf ${species}_${sra}__STARtmp
+    rm ${sra}*.fastq
+  fi
+done
+
+
+#On another terminal
+EXTERNAL_BAM_DIR="/media/dt/LaCie/codon_project_Ribo-seq/BAM"
+RESULT_DIR="/media/dt/LaCie/codon_project_Ribo-seq/RiboCode_Results"
+mkdir -p $EXTERNAL_BAM_DIR $RESULT_DIR
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 5 && $1 !~ /^y/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'` # RNA or Ribo
+  
+  if [ ! -f ${species}*dna*.toplevel.fa ]
+  then
+    sspecies=`echo $species|perl -pe 'tr/A-Z/a-z/'`
+    baseurl1="https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-62"
+    baseurl2="https://ftp.ensemblgenomes.ebi.ac.uk/pub/metazoa/release-62"
+    genome1=`curl ${baseurl1}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds1=`curl ${baseurl1}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff1=`curl ${baseurl1}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    genome2=`curl ${baseurl2}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds2=`curl ${baseurl2}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff2=`curl ${baseurl2}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    wget $baseurl1/fasta/${sspecies}/dna/${genome1}
+    wget $baseurl1/fasta/${sspecies}/cds/${cds1}
+    wget $baseurl1/gff3/${sspecies}/${gff1}
+    wget $baseurl2/fasta/${sspecies}/dna/${genome2}
+    wget $baseurl2/fasta/${sspecies}/cds/${cds2}
+    wget $baseurl2/gff3/${sspecies}/${gff2}
+  fi
+  gunzip ${species}*dna*.toplevel.fa.gz ${species}*.gff3.gz
+
+  if [ ! -d ${species}_STAR_index ]; then
+    mkdir -p ${species}_STAR_index
+    if [ "$species" == "Homo_sapiens" ] || [ "$species" == "Mus_musculus" ]; then
+        SA_BASES=14
+    elif [ "$species" == "Oryza_sativa" ]; then
+        SA_BASES=13
+    elif [ "$species" == "Arabidopsis_thaliana" ] || [ "$species" == "Drosophila_melanogaster" ]; then
+        SA_BASES=12
+    elif [ "$species" == "Saccharomyces_cerevisiae" ]; then
+        SA_BASES=10 # 酵母用
+    elif [ "$species" == "Escherichia_coli" ]; then
+        SA_BASES=10 # 大腸菌用
+    else
+        # 未知の小型ゲノム用にさらに安全な値を設定
+        SA_BASES=10
+    fi
+
+    cp /home/dt/Downloads/${species}*dna*.toplevel.fa ./
+
+    STAR --runMode genomeGenerate --runThreadN 60 \
+         --genomeDir ${species}_STAR_index \
+         --genomeFastaFiles ${species}*dna*.toplevel.fa \
+         --sjdbGTFfile ${species}*.gtf \
+         --sjdbOverhang 100 \
+         --genomeSAindexNbases $SA_BASES
+  fi
+
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  submitter=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Submitter@acc`
+  ssubmitter=`echo $submitter|perl -pe 's/^(\w{6}).*/$1/'`
+
+  if [ ! -f ${sra}.sra ] && [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fi
+  if [ -f ${sra}.sra ] && [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    fasterq-dump -p -e 60 --split-files ${sra}.sra
+    rm ${sra}.sra
+  fi
+  if [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_1.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_2.fastq.bz2"
+    aria2c -x 10 "https://ddbj.nig.ac.jp/public/ddbj_database/dra/fastq/${ssubmitter}/${submitter}/${expt}/${sra}_3.fastq.bz2"
+    pbzip2 -d -p60 ${sra}*.fastq.bz2
+  fi
+  if [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    prefetch ${sra}
+    fasterq-dump -e 60 -p --split-files ${sra}/${sra}.sra
+    rm -r ${sra}
+  fi
+  if [ ! -f ${sra}.fastq ] && [ ! -f ${sra}_1.fastq ] && [ ! -f ${sra}_2.fastq ]
+  then
+    fasterq-dump -p --split-files ${sra}
+  fi
+  if [ -f ${sra}_1.fastq ] && [ -f ${sra}_2.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 3
+  elif [ -f ${sra}_2.fastq ] && [ -f ${sra}_3.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_2.fastq -o ${sra}_R1.fastq -I ${sra}_3.fastq -O ${sra}_R2.fastq -w 3
+  elif ([ -f ${sra}_1.fastq ] || [ -f ${sra}_2.fastq ] || [ -f ${sra}.fastq ]) && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 3
+  fi
+
+  if [ -f ${sra}_R.fastq ] || [ -f ${sra}_R1.fastq ]; then
+    echo "Mapping $sra with STAR..."
+    
+    # マッピング実行（1サンプルに60スレッド割り当て）
+    # Ribo-seqとRNA-seq両方に対応するため、TranscriptomeSAMを出力しておく
+    fastq_input="${sra}_R.fastq"
+    [ -f ${sra}_R1.fastq ] && fastq_input="${sra}_R1.fastq ${sra}_R2.fastq"
+
+    STAR --runThreadN 60 --genomeDir ${species}_STAR_index \
+       --readFilesIn $fastq_input --outFileNamePrefix ${species}_${sra}_ \
+       --outSAMtype BAM SortedByCoordinate --quantMode TranscriptomeSAM GeneCounts \
+       --limitBAMsortRAM 30000000000  # ← ここを追加（約30GB）
+
+    # 5. データ種別による分岐
+    if [ "$data_type" == "Ribo" ]; then
+      # --- Ribo-seqの場合: RiboCodeでコドン集計 ---
+      # RiboCodeの -g には、prepare_transcriptsで作った「ディレクトリ」を指定する
+      metaplots -a ${species}_RiboCode_annot \
+          -r ${species}_${sra}_Aligned.toTranscriptome.out.bam \
+          -o ${species}_${sra}_config
+    　#RiboCode -a ${species}_RiboCode_annot \
+      #         -c ${species}_${sra}_config_pre_config.txt \
+      #        -o ${RESULT_DIR}/${species}_${sra}_ribocode
+      #Neither metaplots nor RiboCode worked in the initial trial and the loop given below was to fix it
+       
+    else
+      # --- RNA-seqの場合: featureCountsで遺伝子集計 ---
+      # STARの標準出力(GeneCounts)も使えるが、詳細設定のためfeatureCountsを実行
+      featureCounts -T 60 -g ID -t gene -a ${species}*.gff3 \
+                    -o ${RESULT_DIR}/${species}_${sra}_gene.count ${species}_${sra}_Aligned.sortedByCoord.out.bam
+      # TPM変換 (既存のcount2tpm.plを利用)
+      count2tpm.pl -g 1 -l 6 -c 7 ${RESULT_DIR}/${species}_${sra}_gene.count > ${RESULT_DIR}/${species}_${sra}_gene.tpm
+    fi
+
+    # 7. ファイル整理とBAMの外部移動
+    # 巨大なBAMを外部ストレージへ移動
+    mv ${species}_${sra}_Aligned.toTranscriptome.out.bam ${species}_${sra}_Aligned.sortedByCoord.out.bam ${EXTERNAL_BAM_DIR}/
+    # 不要な中間ファイル（ゲノム座標BAM等）を削除してディスクを空ける
+
+    rm -rf ${species}_${sra}__STARtmp
+    rm ${sra}*.fastq
+  fi
+done
+
+##################################
+#For DB generation for both Ribo-Seq and RNA-Seq
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Escherichia_coli Saccharomyces_cerevisiae Drosophila_melanogaster Mus_musculus; do
+  #python3 extract_rnaseq_peaks.py -g ${i}*.gff3 -d /dev/shm/${i}_targetcds.db --db-only
+  #python3 fast_db_build.py -g ${i}*.gff3 -d /dev/shm/${i}_targetcds.db
+  ulimit -n 65536
+  python3 parallel_db_build.py -t 110 -g ${i}*.gff3 -d /dev/shm/${i}_targetcds.db
+  cp /dev/shm/${i}_targetcds.db ./
+  rm /dev/shm/${i}_targetcds.db
+done
+
+#For Arabidopsis organelle
+perl -nle 'if(/A[Tt]C[Gg]\d{5}/){print;}' Arabidopsis_thaliana.TAIR10.62.gff3 > At_pt.TAIR10.62.gff3
+perl -nle 'if(/A[Tt]M[Gg]\d{5}/){print;}' Arabidopsis_thaliana.TAIR10.62.gff3 > At_mt.TAIR10.62.gff3
+for i in pt mt; do python3 parallel_db_build.py -t 10 -g At_${i}.TAIR10.62.gff3 -d ./At_${i}_targetcds.db; done
+
+#Obtaining read counts per codon by metaplot and a pyhton script
+# 結果保存ディレクトリ
+RESULT_DIR="./codon_stalling_results"
+#mkdir -p ${RESULT_DIR}
+
+EXTERNAL_BAM_DIR="/media/dt/LaCie/codon_project_Ribo-seq/BAM"
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if(($10 == 3 || $10 == 4) && ($2 == "Saccharomyces cerevisiae" || $2 == "Drosophila melanogaster")){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    CONFIG="${species}_${sra}_config_pre_config.txt"
+    ANNOT="${species}_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity.tsv"
+    OUT_TSV2="${RESULT_DIR}/transcript/${species}_${sra}_ribodensity_transcript.tsv"
+    DB="${species}_targetcds.db"
+
+    # 1. オフセット確認用のPDF生成（必要に応じて継続）
+    if [ ! -f $CONFIG ]; then
+      metaplots -a ${species}_RiboCode_annot \
+              -r $BAM \
+              -o ${species}_${sra}_config \
+              -m 20 -M 40
+    fi
+    
+    # 2. BAMから直接コドン情報を抽出
+    # 引数をスペース区切りで確実に渡す
+    python3 extract_codon_stalling.py "$CONFIG" "$ANNOT" "$BAM" "$OUT_TSV" -d $DB
+    #python3 extract_codon_stalling.py "$CONFIG" "$ANNOT" "$BAM" "$OUT_TSV2" --full
+    echo "Successfully created ${OUT_TSV}" || echo "Failed processing ${species}_${sra}"
+  fi
+done
+
+#On another terminal
+RESULT_DIR="./codon_stalling_results"
+#mkdir -p ${RESULT_DIR}
+
+EXTERNAL_BAM_DIR="/media/dt/LaCie/codon_project_Ribo-seq/BAM"
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 4 && $2 == "Mus musculus"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    CONFIG="${species}_${sra}_config_pre_config.txt"
+    ANNOT="${species}_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity.tsv"
+    OUT_TSV2="${RESULT_DIR}/transcript/${species}_${sra}_ribodensity_transcript.tsv"
+    DB="${species}_targetcds.db"
+
+    # 1. オフセット確認用のPDF生成（必要に応じて継続）
+    if [ ! -f $CONFIG ]; then
+      metaplots -a ${species}_RiboCode_annot \
+              -r $BAM \
+              -o ${species}_${sra}_config \
+              -m 20 -M 40
+    fi
+    
+    # 2. BAMから直接コドン情報を抽出
+    # 引数をスペース区切りで確実に渡す
+    python3 extract_codon_stalling.py "$CONFIG" "$ANNOT" "$BAM" "$OUT_TSV" -d $DB
+    #python3 extract_codon_stalling.py "$CONFIG" "$ANNOT" "$BAM" "$OUT_TSV2" --full
+    echo "Successfully created ${OUT_TSV}" || echo "Failed processing ${species}_${sra}"
+  fi
+done
+
+#For E. coli
+
+RESULT_DIR="./codon_stalling_results"
+#mkdir -p ${RESULT_DIR}
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 3 && $2 == "Escherichia coli"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+
+    metaplots -a ${species}_RiboCode_annot \
+            -r $BAM \
+            -o ${species}_${sra}_config \
+            -m 20 -M 40
+  fi
+done
+#After manually editing the E. coli config files
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 3 && $2 == "Escherichia coli" && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    CONFIG="${species}_${sra}_config_pre_config.txt.edited"
+    ANNOT="${species}_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity.tsv"
+
+    python3 extract_codon_stalling.py "$CONFIG" "$ANNOT" "$BAM" "$OUT_TSV" --all-transcripts
+  fi
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 3 && $2 == "Saccharomyces cerevisiae" && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    CONFIG="${species}_${sra}_config_pre_config.txt"
+    ANNOT="${species}_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity.tsv"
+    DB="${species}_targetcds.db"
+
+    perl -aF"\t" -nle 'if(/^#|^[\r\n]/){print;} else {$F[4]=~s/\d+/0/g; print join("\t", @F);}' ${CONFIG} > ${CONFIG}.edited
+    python3 extract_codon_stalling.py "${CONFIG}.edited" "$ANNOT" "$BAM" "$OUT_TSV" -d $DB
+  fi
+done
+
+#For Arabidopsis organelle
+for i in $(awk -F"\t" 'BEGIN{OFS=","} {if($10 == 1 && $2 == "Arabidopsis thaliana" && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt)
+do
+  species=$(echo $i | cut -d',' -f1)
+  sra=$(echo $i | cut -d',' -f2)
+  data_type=$(echo $i | perl -pe 's/.*(RNA|Ribo).*/$1/')
+  
+  if [ "$data_type" != "Ribo" ]; then
+    continue
+  fi
+
+  for j in pt mt; do
+    echo "Processing Ribo-Seq: ${species}_${sra} (${j})"
+    
+    CONFIG="${species}_${sra}_${j}_config_pre_config.txt"
+    ANNOT="At_${j}_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity_${j}.tsv"
+    DB="At_${j}_targetcds.db"
+
+    # 1. フィルタリング用のIDリストを作成
+    # アノテーション内の transcripts.txt からID（第1列）を抽出
+    GENE_LIST="list_${j}.txt"
+    if [ -f "${ANNOT}/transcripts_cds.txt" ]; then
+      cut -f1 "${ANNOT}/transcripts_cds.txt" > "$GENE_LIST"
+    else
+      echo "Error: Annotation ${ANNOT} not found."
+      continue
+    fi
+
+    # 2. BAMヘッダーとリードをアノテーションに合わせて完全に抽出
+    # ヘッダー(@SQ)を抽出し、データ行もリストにマッチするものだけに絞る
+    TEMP_BAM="${j}.temp.bam"
+    samtools view -h "$BAM" | \
+    awk -v list="$GENE_LIST" 'BEGIN{while((getline < list)>0) l[$1]=1} /^@SQ/{split($2,a,":"); if(l[a[2]]!=1) next} /^@/ || l[$3]==1' | \
+    samtools view -bS - | \
+    samtools sort -o "$TEMP_BAM" 
+    samtools index "$TEMP_BAM"
+
+    # 3. オフセット確認用のPDF生成（設定ファイルがない場合のみ）
+    if [ ! -f "$CONFIG" ]; then
+      metaplots -a "$ANNOT" \
+                -r "$TEMP_BAM" \
+                -o "${species}_${sra}_${j}_config" \
+                -m 20 -M 40
+    fi
+    
+    # 4. コドン情報の抽出実行
+    if python3 extract_codon_stalling_ptmt.py "$CONFIG" "$ANNOT" "$TEMP_BAM" "$OUT_TSV" -d $DB --all-transcripts; then
+      echo "Successfully created ${OUT_TSV}"
+    else
+      echo "Failed processing ${species}_${sra} (${j})"
+    fi
+
+    # 一時ファイルの削除（任意）
+    rm "$TEMP_BAM" "${TEMP_BAM}.bai" "$GENE_LIST"
+  done
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 1 && $2 == "Arabidopsis thaliana" && $12 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3,$6}}' further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  data_type=`echo $i|perl -pe 's/.*(RNA|Ribo).*/$1/'`
+
+  if [ ! "$sra" = "SRR28286091" ] && [ ! "$sra" = "SRR28286087" ]; then continue; fi
+
+  
+  if [ "$data_type" == "Ribo" ]; then
+    echo "Processing Ribo-Seq: ${species}_${sra}"
+    CONFIG="${species}_${sra}_pt_config_pre_config.txt"
+    ANNOT="At_pt_RiboCode_annot"
+    BAM="${EXTERNAL_BAM_DIR}/${species}_${sra}_Aligned.toTranscriptome.out.bam"
+    OUT_TSV="${RESULT_DIR}/${species}_${sra}_ribodensity_pt.tsv"
+    DB="At_pt_targetcds.db"
+
+    # 1. フィルタリング用のIDリストを作成
+    # アノテーション内の transcripts.txt からID（第1列）を抽出
+    GENE_LIST="list_${j}.txt"
+    if [ -f "${ANNOT}/transcripts_cds.txt" ]; then
+      cut -f1 "${ANNOT}/transcripts_cds.txt" > "$GENE_LIST"
+    else
+      echo "Error: Annotation ${ANNOT} not found."
+      continue
+    fi
+
+    # 2. BAMヘッダーとリードをアノテーションに合わせて完全に抽出
+    # ヘッダー(@SQ)を抽出し、データ行もリストにマッチするものだけに絞る
+    TEMP_BAM="${j}.temp.bam"
+    samtools view -h "$BAM" | \
+    awk -v list="$GENE_LIST" 'BEGIN{while((getline < list)>0) l[$1]=1} /^@SQ/{split($2,a,":"); if(l[a[2]]!=1) next} /^@/ || l[$3]==1' | \
+    samtools view -bS - | \
+    samtools sort -o "$TEMP_BAM" 
+    samtools index "$TEMP_BAM"
+
+    if [ "$sra" = "SRR28286091" ] || [ "$sra" = "SRR28286087" ]; then
+      metaplots -a "$ANNOT" \
+                -r "$TEMP_BAM" \
+                -o "${species}_${sra}_pt_config" \
+                -m 20 -M 40
+    fi
+
+    perl -aF"\t" -nle 'if(/^#|^[\r\n]/){print;} else {$F[4]=~s/\d+/0/g; print join("\t", @F);}' ${CONFIG} > ${CONFIG}.edited
+    if python3 extract_codon_stalling_ptmt.py "$CONFIG.edited" "$ANNOT" "$TEMP_BAM" "$OUT_TSV" -d $DB --all-transcripts; then
+      echo "Successfully created ${OUT_TSV}"
+    else
+      echo "Failed processing ${species}_${sra} (${j})"
+    fi
+
+    # 一時ファイルの削除（任意）
+    rm "$TEMP_BAM" "${TEMP_BAM}.bai" "$GENE_LIST"
+  fi
+done
+
+
+###########################################
+#Testing
+perl -nle 'if($.==1){print;} else {if($_=~/AT\dG\d{5}.1[^\d]/i){print;}}' Arabidopsis_thaliana_SRR26297116_ribodensity.tsv > At_SRR26297116_ribodensity_sub.tsv
+
+python3 codon_read_pileup.py At_SRR26297116_ribodensity_sub.tsv CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa -o testpileup_nuc.txt --range 50
+python3 extract_ribo_peaks.py At_SRR26297116_ribodensity_sub.tsv -o At_SRR26297116_ribodensity_sub_sub001.tsv --p_threshold 0.01
+python3 codon_read_pileup.py At_SRR26297116_ribodensity_sub_sub001.tsv CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa -o testpileup_nuc_sub001.txt --range 50
+
+#Analyses with the representative CDS data returned from the new python script
+cd codon_stalling_results
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 1 && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+  
+  if [ "$species" = "Arabidopsis_thaliana" ];then
+    perl -nle 'if($.==1){print;} else {if($_=~/AT\dG\d{5}/i){print;}}' ${IN_BASE}.tsv > ${IN_BASE}_nuc.tsv
+  elif [ "$species" = "Oryza_sativa" ];then
+    perl -nle 'if($.==1){print;} else {if($_=~/Os\d+t\d{5}/i){print;}}' ${IN_BASE}.tsv > ${IN_BASE}_nuc.tsv
+  fi
+
+  python3 ../codon_read_pileup.py ${IN_BASE}_nuc.tsv $FASTA -o ${OUT_BASE}.txt --range 50
+
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub001.tsv --p_threshold 0.01
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub000001.tsv --p_threshold 0.00001
+
+  for j in sub001 sub000001;do
+    if [ "$species" = "Arabidopsis_thaliana" ];then
+      perl -nle 'if($.==1){print;} else {if($_=~/AT\dG\d{5}/i){print;}}' ${IN_BASE}_$j.tsv > ${IN_BASE}_nuc_$j.tsv
+    elif [ "$species" = "Oryza_sativa" ];then
+      perl -nle 'if($.==1){print;} else {if($_=~/Os\d+t\d{5}/i){print;}}' ${IN_BASE}_$j.tsv > ${IN_BASE}_nuc_$j.tsv
+    fi
+    python3 ../codon_read_pileup.py ${IN_BASE}_nuc_$j.tsv $FASTA -o ${OUT_BASE}_$j.txt --range 50
+  done
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 2 && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+
+  python3 ../codon_read_pileup2.py ${IN_BASE}.tsv $FASTA -o ${OUT_BASE}.txt --range 50
+
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub005.tsv --p_threshold 0.05
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub0001.tsv --p_threshold 0.001
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub005.tsv $FASTA -o ${OUT_BASE}_sub005.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub0001.tsv $FASTA -o ${OUT_BASE}_sub0001.txt --range 50
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 > 2 && $11 == "y" && ($2 == "Saccharomyces cerevisiae" || $2 == "Drosophila melanogaster")){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+
+  python3 ../codon_read_pileup2.py ${IN_BASE}.tsv $FASTA -o ${OUT_BASE}.txt --range 50
+
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub005.tsv --p_threshold 0.05
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub0001.tsv --p_threshold 0.001
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub005.tsv $FASTA -o ${OUT_BASE}_sub005.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub0001.tsv $FASTA -o ${OUT_BASE}_sub0001.txt --range 50
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 > 2 && $11 == "y" && ($2 == "Mus musculus" || $2 == "Escherichia coli")){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+
+  python3 ../codon_read_pileup2.py ${IN_BASE}.tsv $FASTA -o ${OUT_BASE}.txt --range 50
+
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub005.tsv --p_threshold 0.05
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub0001.tsv --p_threshold 0.001
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub005.tsv $FASTA -o ${OUT_BASE}_sub005.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub0001.tsv $FASTA -o ${OUT_BASE}_sub0001.txt --range 50
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 1 && $12 == "y" && $2 == "Arabidopsis thaliana"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity_pt"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup_pt"
+
+  python3 ../codon_read_pileup2.py ${IN_BASE}.tsv $FASTA -o ${OUT_BASE}.txt --range 50
+
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub005.tsv --p_threshold 0.05
+  python3 ../extract_ribo_peaks.py ${IN_BASE}.tsv -o ${IN_BASE}_sub0001.tsv --p_threshold 0.001
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub005.tsv $FASTA -o ${OUT_BASE}_sub005.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_sub0001.tsv $FASTA -o ${OUT_BASE}_sub0001.txt --range 50
+done
+
+
+#For the data with no peaks
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if(($10 == 1 || $10 == 2) && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+
+  if [ $species = "Homo_sapiens" ]; then
+    awk '
+    BEGIN{OFS="\t"};
+    NR==FNR { if(NR>1) a[$0]; next } 
+    FNR==1 { print; next } 
+    !($0 in a)
+    ' ${IN_BASE}_sub005.tsv ${IN_BASE}.tsv > ${IN_BASE}_flat_regions.tsv
+
+    perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub005.tsv > ${IN_BASE}_sub005_gene_list.txt
+    perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub0001.tsv > ${IN_BASE}_sub0001_gene_list.txt
+    perl -se '
+      %targetgene;
+      open(IF, , $IN_BASE . "_sub005_gene_list.txt");
+      while($line=<IF>){($gene,$file)=split("\t",$line); $targetgene{$gene}++;}
+      close(IF);
+      while($line=<>){
+        ($curgene,$ribo)=split("\t", $line, 2);
+        if(!$targetgene{$curgene}){print $line;}
+      }
+    ' -- -IN_BASE="$IN_BASE" "${IN_BASE}.tsv" > ${IN_BASE}_flat_genes.tsv
+    
+    python3 ../codon_read_pileup2.py ${IN_BASE}_flat_regions.tsv $FASTA -o ${OUT_BASE}_flat_regions.txt --range 50
+    python3 ../codon_read_pileup2.py ${IN_BASE}_flat_genes.tsv $FASTA -o ${OUT_BASE}_flat_genes.txt --range 50
+  else
+    awk '
+    BEGIN{OFS="\t"};
+    NR==FNR { if(NR>1) a[$0]; next } 
+    FNR==1 { print; next } 
+    !($0 in a)
+    ' ${IN_BASE}_nuc_sub001.tsv ${IN_BASE}_nuc.tsv > ${IN_BASE}_nuc_flat_regions.tsv
+
+    perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_nuc_sub001.tsv > ${IN_BASE}_nuc_sub001_gene_list.txt
+    perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_nuc_sub000001.tsv > ${IN_BASE}_nuc_sub000001_gene_list.txt
+    perl -se '
+      %targetgene;
+      open(IF, , $IN_BASE . "_nuc_sub001_gene_list.txt");
+      while($line=<IF>){($gene,$file)=split("\t",$line); $targetgene{$gene}++;}
+      close(IF);
+      while($line=<>){
+        ($curgene,$ribo)=split("\t", $line, 2);
+        if(!$targetgene{$curgene}){print $line;}
+      }
+    ' -- -IN_BASE="$IN_BASE" "${IN_BASE}_nuc.tsv" > ${IN_BASE}_nuc_flat_genes.tsv
+    
+    python3 ../codon_read_pileup.py ${IN_BASE}_nuc_flat_regions.tsv $FASTA -o ${OUT_BASE}_nuc_flat_regions.txt --range 50
+    python3 ../codon_read_pileup.py ${IN_BASE}_nuc_flat_genes.tsv $FASTA -o ${OUT_BASE}_nuc_flat_genes.txt --range 50
+  fi  
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if(($10 > 2) && $11 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup"
+
+  awk '
+  BEGIN{OFS="\t"};
+  NR==FNR { if(NR>1) a[$0]; next } 
+  FNR==1 { print; next } 
+  !($0 in a)
+  ' ${IN_BASE}_sub005.tsv ${IN_BASE}.tsv > ${IN_BASE}_flat_regions.tsv
+  perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub005.tsv > ${IN_BASE}_sub005_gene_list.txt
+  perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub0001.tsv > ${IN_BASE}_sub0001_gene_list.txt
+  perl -se '
+    %targetgene;
+    open(IF, , $IN_BASE . "_sub005_gene_list.txt");
+    while($line=<IF>){($gene,$file)=split("\t",$line); $targetgene{$gene}++;}
+    close(IF);
+    while($line=<>){
+      ($curgene,$ribo)=split("\t", $line, 2);
+      if(!$targetgene{$curgene}){print $line;}
+    }
+  ' -- -IN_BASE="$IN_BASE" "${IN_BASE}.tsv" > ${IN_BASE}_flat_genes.tsv
+  python3 ../codon_read_pileup2.py ${IN_BASE}_flat_regions.tsv $FASTA -o ${OUT_BASE}_flat_regions.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_flat_genes.tsv $FASTA -o ${OUT_BASE}_flat_genes.txt --range 50
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($10 == 1 && $12 == "y"){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); gsub(" ", "_", $6); print $2,$3}}' ../further_Ribo-Seq_data.txt`
+do
+  species=`echo $i | cut -d',' -f1`
+  sra=`echo $i | cut -d',' -f2`
+  IN_BASE="${species}_${sra}_ribodensity_pt"
+  FASTA="/home/dt/Downloads/${species}*cds*.fa"
+  OUT_BASE="${species}_${sra}_ribo_pileup_pt"
+
+  awk '
+  BEGIN{OFS="\t"};
+  NR==FNR { if(NR>1) a[$0]; next } 
+  FNR==1 { print; next } 
+  !($0 in a)
+  ' ${IN_BASE}_sub005.tsv ${IN_BASE}.tsv > ${IN_BASE}_flat_regions.tsv
+  perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub005.tsv > ${IN_BASE}_sub005_gene_list.txt
+  perl -aF"\t" -snle 'if($. > 1){print "$F[0]\t$sample";}' -- -sample=$sra ${IN_BASE}_sub0001.tsv > ${IN_BASE}_sub0001_gene_list.txt
+  perl -se '
+    %targetgene;
+    open(IF, , $IN_BASE . "_sub005_gene_list.txt");
+    while($line=<IF>){($gene,$file)=split("\t",$line); $targetgene{$gene}++;}
+    close(IF);
+    while($line=<>){
+      ($curgene,$ribo)=split("\t", $line, 2);
+      if(!$targetgene{$curgene}){print $line;}
+    }
+  ' -- -IN_BASE="$IN_BASE" "${IN_BASE}.tsv" > ${IN_BASE}_flat_genes.tsv
+  python3 ../codon_read_pileup2.py ${IN_BASE}_flat_regions.tsv $FASTA -o ${OUT_BASE}_flat_regions.txt --range 50
+  python3 ../codon_read_pileup2.py ${IN_BASE}_flat_genes.tsv $FASTA -o ${OUT_BASE}_flat_genes.txt --range 50
+done
+
+
+head -1 Arabidopsis_thaliana_SRR25120045_ribo_pileup.txt > all_ribo_pileup.txt
+for i in Oryza_sativa*ribo_pileup*.txt Arabidopsis_thaliana*ribo_pileup*.txt Homo_sapiens*ribo_pileup*.txt Mus_musculus*ribo_pileup*.txt Drosophila_melanogaster*ribo_pileup*.txt Saccharomyces_cerevisiae*ribo_pileup*.txt Escherichia_coli*ribo_pileup*.txt; do
+  perl -sne 'if ($. > 1) {$line=$_; $line=~s/[\r\n]+//; print "$line\t$filename\n";}' -- -filename=$i $i
+done >> all_ribo_pileup.txt

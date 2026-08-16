@@ -1,0 +1,440 @@
+#Obtaining data from the codonstatsdb (http://codonstatsdb.unr.edu/index.html)
+
+#"species_list.txt" was generated and updated by copying and pasting the data of https://docs.google.com/spreadsheets/d/1yFOrS4TkaiOx2PSwvB5JjXMgadT8tewckQp5jmg2YOQ/edit?gid=0#gid=0
+
+mkdir codonstats_data
+for i in `perl -aF"\t" -nle 'if($. > 1){$F[2]=~s/ /_/g; $F[3]=~s/ /_/g; $F[4]=~s/ /_/g; print "$F[2]-$F[3]-$F[4]-$F[5],$F[5]"}' species_list.txt`
+do
+  filename=`echo $i|perl -pe 's/,.*//'`
+  taxid=`echo $i|perl -pe 's/.*,//'`
+  wget -O codonstats_data/${filename}.txt http://codonstatsdb.unr.edu/data/${taxid}/nuclear_codon_statistics.tsv
+done
+
+#Nine species did not return the codon stats data and were highlighted in gray in the above list 
+
+####################################
+#DT_module is available at https://drive.google.com/drive/folders/1Ej74CEUFOvPeiZzz8-Wm6LLrHWq1YYpU?usp=drive_link
+
+#"RNA-Seq_data_used.txt" was generated and updated by copying and pasting the data of https://docs.google.com/spreadsheets/d/1yFOrS4TkaiOx2PSwvB5JjXMgadT8tewckQp5jmg2YOQ/edit?pli=1&gid=63552520#gid=63552520
+
+####################################
+
+#Obtaining RNA-Seq metadata using Entrez Direct
+#installing Entrez Direct
+sudo apt install ncbi-entrez-direct
+
+#To finalize obtaining the metadata
+#for i in `awk -F"\t" 'NR>1{if($1 ~ /^y/) {print $3}}' RNA-Seq_data_used.txt`
+#do
+#  esearch -db sra -query $i | efetch -format xml | xtract -pattern EXPERIMENT_PACKAGE -element RUN@accession SAMPLE@accession STUDY@accession EXPERIMENT_REF@accession TITLE LIBRARY_STRATEGY #LIBRARY_SOURCE LIBRARY_SELECTION LIBRARY_CONSTRUCTION_PROTOCOL STUDY_TITLE STUDY_ABSTRACT
+#done
+
+for i in `awk -F"\t" 'NR>1{if($1 ~ /^[^A-Z]/) {print $3}}' RNA-Seq_data_used.txt`
+do
+  printf "$i\t"
+  biosample=`esearch -db sra -query $i | efetch -format xml | xtract -pattern EXPERIMENT_PACKAGE -element EXTERNAL_ID | grep SAMN | perl -pe 's/.*(SAMN\d+).*/$1/;'`
+  esearch -db biosample -query $biosample | efetch -format xml | xtract -pattern BioSampleSet -element Title Attribute@attribute_name Attribute
+done > RNA-Seq_data_used_metadata.txt
+#######################################
+
+#RNA-Seq data analyses
+
+#CDSs consistent with the reference genomes were manually downloaded
+
+#For rice
+
+hisat2-build blastdb/IRGSP-1.0_genome.fasta hisat2db/IRGSP-1.0_genome
+
+for i in `awk -F"\t" 'BEGIN{OFS="_";} NR>1{if($1 == "Rice" && $1 != "\#" && ($3 == "mRNA" || $3 == "RNA")){print $2}}' RNA-Seq_data_used.txt`
+do
+  fasterq-dump --split-files -p $i
+  if [ -f ${i}_2.fastq ]; then
+    fastp -i ${i}_1.fastq -o ${i}_R1.fastq -I ${i}_2.fastq -O ${i}_R2.fastq
+    hisat2 -x ../hisat2db/IRGSP-1.0_genome -1 ${i}_R1.fastq -2 ${i}_R2.fastq -S $i.sam -p 3
+    samtools sort -@ 3 -O BAM $i.sam > $i.bam
+    samtools index $i.bam
+    rm $i.sam ${i}*R*.fastq
+    do
+      featureCounts -p -T 3 -t gene -g ID -a Oryza_sativa.IRGSP-1.0.59.mod.gff3 -o Os_${i}_gene.count.txt $i.bam
+      ../DT_modules/count2tpm.pl -g 1 -l 6 -c 7 Os_${i}_gene.count.txt > Os_${i}_gene.tpm.txt
+    done
+  else
+    fastp -i ${i}.fastq -o ${i}_R.fastq
+    hisat2 -x ../hisat2db/IRGSP-1.0_genome -U ${i}_R.fastq -S $i.sam -p 3
+    samtools sort -@ 3 -O BAM $i.sam > $i.bam
+    samtools index $i.bam
+    rm $i.sam ${i}*R*.fastq
+    do
+      featureCounts -T 3 -t gene -g ID -a Oryza_sativa.IRGSP-1.0.59.mod.gff3 -o Os_${i}_gene.count.txt $i.bam
+      ../DT_modules/count2tpm.pl -g 1 -l 6 -c 7 Os_${i}_gene.count.txt > Os_${i}_gene.tpm.txt
+    done
+  fi
+  done
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Os*_gene.tpm.txt" > Os_all_gene_tpm.txt
+
+
+#For wheat
+
+gunzip Triticum_aestivum.IWGSC.dna_sm.toplevel.fa.gz
+rename 's/Triticum_aestivum.IWGSC.dna_sm.toplevel.fa/Wheat_genome_IWGSC60.fa/' Triticum_aestivum.IWGSC.dna_sm.toplevel.fa
+hisat2-build Wheat_genome_IWGSC60.fa Wheat_genome
+
+for i in `awk -F"\t" 'BEGIN{OFS="_"} {if($1 == "Wheat" && $3 == "mRNA"){print $2,$4}}' RNA-Seq_data_used.txt`
+do
+  sra=`echo $i|perl -pe 's/_.*//'`
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fasterq-dump -p --split-files ${sra}.sra
+  rm *.sra
+  if [ -f ${sra}_2.fastq ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 16
+    hisat2 -p 124 -x Wheat_genome -1 ${sra}_R1.fastq -2 ${sra}_R2.fastq -S Wheat_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Wheat_$i.bam Wheat_$i.sam
+    samtools index Wheat_$i.bam
+    rm *.sam
+    featureCounts -p -g ID -t gene -a Wheat_genome_IWGSC60.gff -o Wheat_${i}_gene.count Wheat_$i.bam
+  else
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+    hisat2 -p 124 -x Wheat_genome -U ${sra}_R.fastq -S Wheat_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Wheat_$i.bam Wheat_$i.sam
+    samtools index -@ 124 Wheat_$i.bam
+    rm *.sam
+    featureCounts -g ID -t gene -a Wheat_genome_IWGSC60.gff -o Wheat_${i}_gene.count Wheat_$i.bam
+  fi
+  count2tpm.pl -g 1 -l 6 -c 7 Wheat_${i}_gene.count > Wheat_${i}_gene.tpm
+done
+
+#for i in `awk -F"\t" 'BEGIN{OFS="_"} {if($1 == "Wheat" && $2 ~ /^SRR/ && $3 == "mRNA"){print $2,$4}}' RNA-Seq_data_used.txt`
+#do
+#  featureCounts -p -g ID -t gene -a Wheat_genome_IWGSC60.gff -o Wheat_${i}_gene.count Wheat_$i.bam
+#  count2tpm.pl -g 1 -l 6 -c 7 Wheat_${i}_gene.count > Wheat_${i}_gene.tpm
+#done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Wheat*_gene.tpm" > Ta_all_gene_tpm.txt
+
+
+#For barley
+
+hisat2-build Hv_MorexV3_genome Hv_genome
+
+for i in `awk -F"\t" 'BEGIN{OFS="_"} {if($1 == "Barley" && $3 == "mRNA"){print $2,$4}}' RNA-Seq_data_used.txt`
+do
+  sra=`echo $i|perl -pe 's/_.*//'`
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fasterq-dump -p --split-files ${sra}.sra
+  rm *.sra
+  if [ -f ${sra}_2.fastq ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 16
+    hisat2 -p 124 -x Hv_genome -1 ${sra}_R1.fastq -2 ${sra}_R2.fastq -S Hv_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Hv_$i.bam Hv_$i.sam
+    samtools index Hv_$i.bam
+    rm *.sam
+    featureCounts -p -g ID -t gene -a Hv_morexV3_genome.gff -o Hv_${i}_gene.count Hv_$i.bam
+  else
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+    hisat2 -p 124 -x Hv_genome -U ${sra}_R.fastq -S Hv_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Hv_$i.bam Hv_$i.sam
+    samtools index -@ 124 Hv_$i.bam
+    rm *.sam
+    featureCounts -g ID -t gene -a Hv_morexV3_genome.gff -o Hv_${i}_gene.count Hv_$i.bam
+  fi
+  count2tpm.pl -g 1 -l 6 -c 7 Hv_${i}_gene.count > Hv_${i}_gene.tpm
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Hv*_gene.tpm" > Hv_all_gene_tpm.txt
+
+
+#For maize
+
+gunzip Zea_mays.Zm-B73-REFERENCE-NAM-5.0.dna_sm.toplevel.fa.gz Zea_mays.Zm-B73-REFERENCE-NAM-5.0.62.gff3.gz
+rename 's/Zea_mays.Zm-B73-REFERENCE-NAM-5.0.dna_sm.toplevel.fa/Zm-B73-NAM-5.0_sm.fa/' Zea_mays.Zm-B73-REFERENCE-NAM-5.0.dna_sm.toplevel.fa
+rename 's/Zea_mays.Zm-B73-REFERENCE-NAM-5.0.62.gff3/Zm-B73-NAM-5.0.gff/' Zea_mays.Zm-B73-REFERENCE-NAM-5.0.62.gff3
+hisat2-build Zm-B73-NAM-5.0_sm.fa Zm_genome
+
+for i in `awk -F"\t" 'BEGIN{OFS="_"} {if($1 == "Maize" && $3 == "mRNA"){print $2,$4}}' RNA-Seq_data_used.txt`
+do
+  sra=`echo $i|perl -pe 's/_.*//'`
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fasterq-dump -p --split-files ${sra}.sra
+  rm *.sra
+  if [ -f ${sra}_2.fastq ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 16
+    hisat2 -p 124 -x Zm_genome -1 ${sra}_R1.fastq -2 ${sra}_R2.fastq -S Zm_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Zm_$i.bam Zm_$i.sam
+    samtools index Zm_$i.bam
+    rm *.sam
+    featureCounts -p -g ID -t gene -a Zm-B73-NAM-5.0.gff -o Zm_${i}_gene.count Zm_$i.bam
+  else
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+    hisat2 -p 124 -x Zm_genome -U ${sra}_R.fastq -S Zm_$i.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o Zm_$i.bam Zm_$i.sam
+    samtools index -@ 124 Zm_$i.bam
+    rm *.sam
+    featureCounts -g ID -t gene -a Zm-B73-NAM-5.0.gff -o Zm_${i}_gene.count Zm_$i.bam
+  fi
+  count2tpm.pl -g 1 -l 6 -c 7 Zm_${i}_gene.count > Zm_${i}_gene.tpm
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Zm*_gene.tpm" > Zm_all_gene_tpm.txt
+
+
+mkdir /media/dt/LaCie/codon_project_RNA-Seq
+mkdir /media/dt/LaCie/codon_project_RNA-Seq/TPM
+for i in Hv Zm #Wheat datasets were manually moved 
+do mv ${i}_*.bam ${i}_*.bam.bai /media/dt/LaCie/codon_project_RNA-Seq/
+done
+for i in Hv Zm Ta 
+do mv ${i}_*tpm.txt /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+done
+
+
+#For human, mouse and yeast
+#After downloading genome, CDS and GFF files from Ensembl 
+gunzip Homo_sapiens*.gz Mus_musculus*.gz Saccharomyces_cerevisiae*.gz
+gzip Homo_sapiens*.cds.all.fa Mus_musculus*.cds.all.fa Saccharomyces_cerevisiae*.cds.all.fa
+rename 's/Saccharomyces_cerevisiae/Sc/' Saccharomyces_cerevisiae*.gff3
+rename 's/Homo_sapiens/Hs/' Homo_sapiens*.gff3
+rename 's/Mus_musculus/Mm/' Mus_musculus*.gff3
+hisat2-build Saccharomyces_cerevisiae.R64-1-1.dna_sm.toplevel.fa Sc_genome
+hisat2-build Homo_sapiens.GRCh38.dna_sm.toplevel.fa Hs_genome
+hisat2-build Mus_musculus.GRCm39.dna_sm.toplevel.fa Mm_genome
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if($1 != "y" && ($2 ~ /Saccharomyces cerevisiae/||$2 ~ /Human/||$2 ~ /Mouse/) && $6 !~ /starvation|limited/){print $2,$3}}' RNA-Seq_data_used.txt` #This didn't work for human and mouse (possibly due to the DDBJ server maintenance)
+#for i in `awk -F"\t" 'BEGIN{OFS=","} {if($1 !~ /y/ && $2 ~ /Mouse/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2,$3}}' RNA-Seq_data_used.txt`
+do
+  #prefix=`echo $i|perl -pe 's/,.*//'|perl -pe 's/Saccharomyces_cerevisiae/Sc/'|perl -pe 's/Human/Hs/'|perl -pe 's/Mouse/Mm/'`
+  prefix="Mm"
+  sra=`echo $i|perl -pe 's/.*,//'`
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+  aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  if [ -f ${sra}.sra ]
+  then
+    fasterq-dump -p --split-files ${sra}.sra
+    rm *.sra
+  fi
+  if [ ! -f ${sra}_1.fastq ]
+  #if [ ! -f ${prefix}_${sra}.bam ]
+  then
+    fasterq-dump -p --split-files ${sra}
+  fi
+  rm *.sra
+  if [ -f ${sra}_2.fastq ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 16
+    hisat2 -p 124 -x ${prefix}_genome -1 ${sra}_R1.fastq -2 ${sra}_R2.fastq -S ${prefix}_${sra}.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o ${prefix}_${sra}.bam ${prefix}_${sra}.sam
+    samtools index ${prefix}_${sra}.bam
+    rm *.sam
+    featureCounts -p -g ID -t gene -a ${prefix}*.gff3 -o ${prefix}_${sra}_gene.count ${prefix}_${sra}.bam
+  elif [ -f ${sra}_1.fastq ] || [ -f ${sra}_2.fastq ] ||[ -f ${sra}.fastq ]
+  then
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+    hisat2 -p 124 -x ${prefix}_genome -U ${sra}_R.fastq -S ${prefix}_${sra}.sam
+    rm *.fastq
+    samtools sort -@ 124 -O BAM -o ${prefix}_${sra}.bam ${prefix}_${sra}.sam
+    samtools index -@ 124 ${prefix}_${sra}.bam
+    rm *.sam
+    featureCounts -g ID -t gene -a ${prefix}*.gff3 -o ${prefix}_${sra}_gene.count ${prefix}_${sra}.bam
+  fi
+  count2tpm.pl -g 1 -l 6 -c 7 ${prefix}_${sra}_gene.count > ${prefix}_${sra}_gene.tpm
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Sc*_gene.tpm" > Sc_all_gene_tpm.txt
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Hs*_gene.tpm" > Hs_all_gene_tpm.txt
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Mm*_gene.tpm" > Mm_all_gene_tpm.txt
+
+for i in Sc Hs Mm 
+do
+  mv ${i}_*.bam ${i}_*.bam.bai /media/dt/LaCie/codon_project_RNA-Seq/
+  mv ${i}_*tpm.txt /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+done
+
+
+
+#For Arabidopsis and the others
+#After downloading genome, CDS and GFF files from Ensembl for Escherichia coli and Bacillus subtilis
+
+#for i in `awk -F"\t" 'BEGIN{OFS=","} {if($2 ~ /Arabidopsis/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2,$3}}' RNA-Seq_data_used.txt`
+#for i in `awk -F"\t" 'BEGIN{OFS=","} {if($1 !~ /y/ && $2 ~ /Drosophila/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2,$3}}' RNA-Seq_data_used.txt`
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} {if(($1 !~ /\w/ || $1 ~ /Data is very large/) && $2 !~ /Wheat/ && $2 !~ /Pearl millet/ && $2 !~ /Saccharomyces/ && $2 !~ /Arabidopsis/ && $2 !~ /Drosophila/ && $2 !~ /Brassica/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2,$3}}' RNA-Seq_data_used.txt`
+do
+  species=`echo $i|perl -pe 's/,.*//'`
+  sra=`echo $i|perl -pe 's/.*,//'`
+  if [ ! -f ${species}*dna*.toplevel.fa ]
+  then
+    sspecies=`echo $species|perl -pe 'tr/A-Z/a-z/'`
+    baseurl1="https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-62"
+    baseurl2="https://ftp.ensemblgenomes.ebi.ac.uk/pub/metazoa/release-62"
+    genome1=`curl ${baseurl1}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds1=`curl ${baseurl1}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff1=`curl ${baseurl1}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    genome2=`curl ${baseurl2}/fasta/${sspecies}/dna/|perl -nlse 'if(/href="($species.*?dna_sm.toplevel.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    cds2=`curl ${baseurl2}/fasta/${sspecies}/cds/|perl -nlse 'if(/href="($species.*?.cds.all.fa.gz)"/){print "$1\n"};' -- -species=$species`
+    gff2=`curl ${baseurl2}/gff3/${sspecies}/|perl -nlse 'if(/href="($species.*?.gff3.gz)"/){$cfile = $1; if($cfile !~ /chr/) {print "$cfile\n";}}' -- -species=$species`
+    wget $baseurl1/fasta/${sspecies}/dna/${genome1}
+    wget $baseurl1/fasta/${sspecies}/cds/${cds1}
+    wget $baseurl1/gff3/${sspecies}/${gff1}
+    wget $baseurl2/fasta/${sspecies}/dna/${genome2}
+    wget $baseurl2/fasta/${sspecies}/cds/${cds2}
+    wget $baseurl2/gff3/${sspecies}/${gff2}
+  fi
+  gunzip ${species}*dna*.toplevel.fa.gz ${species}*.gff3.gz
+  if [ ! -f ${species}_genome.1.ht2* ]
+  then
+    hisat2-build ${species}*dna*.toplevel.fa ${species}_genome
+  fi
+  #prefix=`echo $i|perl -pe 's/,.*//'|perl -pe 's/Saccharomyces_cerevisiae/Sc/'|perl -pe 's/Human/Hs/'|perl -pe 's/Mouse/Mm/'`
+  expt=`efetch -db sra -id $sra -format docsum|xtract -pattern DocumentSummarySet -element Experiment@acc`
+  sexpt=`echo $expt|perl -pe 's/^(\w{6}).*/$1/'`
+  ssexpt=`echo $expt|perl -pe 's/^(\w{3}).*/$1/'`
+
+  ###For maize data from here
+  if [ -f /media/dt/LaCie/codon_project_RNA-Seq/${species}_${sra}.bam ]
+  then
+    featureCounts -p -g ID -t gene -a ${species}*.gff3 -o ${species}_${sra}_gene.count /media/dt/LaCie/codon_project_RNA-Seq/${species}_${sra}.bam
+    if [ ! -f ${species}_${sra}_gene.count ]
+    then
+      featureCounts -g ID -t gene -a ${species}*.gff3 -o ${species}_${sra}_gene.count /media/dt/LaCie/codon_project_RNA-Seq/${species}_${sra}.bam
+    fi
+  fi
+  if [ -f ${species}_${sra}_gene.count ]
+  then
+    count2tpm.pl -g 1 -l 6 -c 7 ${species}_${sra}_gene.count > ${species}_${sra}_gene.tpm
+    continue
+  fi
+  ###For maize data to here
+
+  if [ ! -f ${sra}.sra ] && [ ! -f ${sra}*.fastq ]
+  then
+    aria2c -x 10 "ftp://ftp.ddbj.nig.ac.jp/ddbj_database/dra/sralite/ByExp/litesra/${ssexpt}/${sexpt}/${expt}/${sra}/${sra}.sra"
+  fi
+  if [ -f ${sra}.sra ] && [ ! -f ${sra}*.fastq ] 
+  then
+    fasterq-dump -p --split-files ${sra}.sra
+    rm ${sra}.sra
+  fi
+  if [ ! -f ${sra}*.fastq ]
+  then
+    fasterq-dump -p --split-files ${sra}
+  fi
+  if [ -f ${sra}_1.fastq ] && [ -f ${sra}_2.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_1.fastq -o ${sra}_R1.fastq -I ${sra}_2.fastq -O ${sra}_R2.fastq -w 16
+  elif [ -f ${sra}_2.fastq ] && [ -f ${sra}_3.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}_2.fastq -o ${sra}_R1.fastq -I ${sra}_3.fastq -O ${sra}_R2.fastq -w 16
+  elif ([ -f ${sra}_1.fastq ] || [ -f ${sra}_2.fastq ] || [ -f ${sra}.fastq ]) && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+  fi
+  if [ -f ${sra}_R1.fastq ] && [ -f ${sra}_R2.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    hisat2 -p 124 -x ${species}_genome -1 ${sra}_R1.fastq -2 ${sra}_R2.fastq -S ${species}_${sra}.sam
+    rm ${sra}*.fastq
+    samtools sort -@ 124 -O BAM -o ${species}_${sra}.bam ${species}_${sra}.sam
+    samtools index ${species}_${sra}.bam
+    if [ ! -f ${species}_${sra}.bam.bai ]
+    then
+      samtools index -c ${species}_${sra}.bam
+    fi
+    rm ${species}_${sra}.sam
+    ~/subread-2.1.1/bin/featureCounts -p -T 64 -g ID -t gene -a ${species}*.gff3 -o ${species}_${sra}_gene.count ${species}_${sra}.bam
+    if [ ! -f ${species}_${sra}_gene.count ]
+    then
+      ~/subread-2.1.1/bin/featureCounts -T 64 -g ID -t gene -a ${species}*.gff3 -o ${species}_${sra}_gene.count ${species}_${sra}.bam
+    fi
+  elif [ -f ${sra}_R.fastq ] && [ ! -f ${species}_${sra}.bam ]
+  then
+    fastp -i ${sra}*.fastq -o ${sra}_R.fastq -w 16
+    hisat2 -p 124 -x ${species}_genome -U ${sra}_R.fastq -S ${species}_${sra}.sam
+    rm ${sra}*.fastq
+    samtools sort -@ 124 -O BAM -o ${species}_${sra}.bam ${species}_${sra}.sam
+    samtools index -@ 124 ${species}_${sra}.bam
+    if [ ! -f ${species}_${sra}.bam.bai ]
+    then
+      samtools index -c ${species}_${sra}.bam
+    fi
+    rm ${species}_${sra}.sam
+    ~/subread-2.1.1/bin/featureCounts -T 64 -g ID -t gene -a ${species}*.gff3 -o ${species}_${sra}_gene.count ${species}_${sra}.bam
+  fi
+  if [ -f ${species}_${sra}_gene.count ]
+  then
+    count2tpm.pl -g 1 -l 6 -c 7 ${species}_${sra}_gene.count > ${species}_${sra}_gene.tpm
+  fi
+  mv ${species}_${sra}.bam ${species}_${sra}.bam.bai /media/dt/LaCie/codon_project_RNA-Seq/
+  #mv ${species}_*tpm.txt /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Arabidopsis_thaliana_*.tpm" > Arabidopsis_thaliana_all_gene_tpm.txt
+mv Arabidopsis_thaliana_*.bam Arabidopsis_thaliana_*.bam.bai /media/dt/LaCie/codon_project_RNA-Seq/
+mv Arabidopsis_thaliana_*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Drosophila_melanogaster_*.tpm" > Drosophila_melanogaster_all_gene_tpm.txt
+mv Drosophila_melanogaster_*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Brassica_rapa_*.tpm" > Brassica_rapa_all_gene_tpm.txt
+mv Brassica_rapa_*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} NR>1{if($1 ~ /^y/ && $2 !~ /Rice/ && $2 !~ /Wheat/ && $2 !~ /Barley/  && $2 !~ /Maize/ && $2 !~ /Pearl/ && $2 !~ /Saccharomyces/ && $2 !~ /Human/ && $2 !~ /Mouse/ && $2 !~ /Arabidopsis/ && $2 !~ /Drosophila/ && $2 !~ /Brassica/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2}}' RNA-Seq_data_used.txt|uniq`
+do
+  ../DT_modules/bindfpkm.pl -g 1 -d 2 -p "${i}_*gene.tpm" > ${i}_all_gene_tpm.txt
+  mv ${i}_*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+done
+
+for i in `awk -F"\t" 'BEGIN{OFS=","} NR>1{if($1 ~ /^y/ && $2 ~ /Mycobacterium|Salmonella/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2}}' RNA-Seq_data_used.txt|uniq`
+do
+  ../DT_modules/bindfpkm.pl -g 1 -d 2 -p "${i}_*gene.tpm" > ${i}_all_gene_tpm.txt
+  mv ${i}*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/; done
+done
+
+../DT_modules/bindfpkm.pl -g 1 -d 2 -p "Allium_cepa_*gene.tpm" > Allium_cepa_all_gene_tpm.txt
+mv Allium_cepa_*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+
+for i in Hordeum_vulgare Sorghum_bicolor
+do
+  ../DT_modules/bindfpkm.pl -g 1 -d 2 -p "${i}*gene.tpm" > ${i}_all_gene_tpm.txt
+  mv $i*gene.tpm /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+done
+
+#To make the final versions of TPM matrixes
+for i in `awk -F"\t" 'NR>1{if($1 ~ /^y/ && $9 == "y") {print $3;}}' RNA-Seq_data_used.txt`
+do if [ ! -f /media/dt/LaCie/codon_project_RNA-Seq/TPM/*$i*gene.tpm ]; then echo $i; fi; done > missing_data.txt
+
+cd /media/dt/LaCie/codon_project_RNA-Seq/TPM/
+for i in `awk -F"\t" 'NR>1{if($2 ~ /Rice|Maize|Human|Mouse|Allium|Escherichia/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2;}}' ~/Downloads/RNA-Seq_data_used.txt|sort|uniq`
+do
+  files=`perl -s -aF"\t" -ne '$spc = $shspc; $spc=~s/_/ /g; if($F[1]=~$spc && $F[8] eq "y"){print "${shspc}_$F[2]_gene.tpm ";}' -- -shspc=$i ~/Downloads/RNA-Seq_data_used.txt`
+  echo $i
+  ~/DT_modules/bindfpkm.pl -g 1 -d 2 -p "${files}" > ~/Downloads/${i}_all_gene_tpm.txt
+done
+
+#Again after fixing issues for some species
+for i in `awk -F"\t" 'NR>1{if($2 ~ /Brassica/){gsub(/.*\(|\)/, "", $2); gsub(" ", "_", $2); print $2;}}' ~/Downloads/RNA-Seq_data_used.txt|sort|uniq`
+do
+  files=`perl -s -aF"\t" -ne '$spc = $shspc; $spc=~s/_/ /g; if($F[1]=~$spc && $F[8] eq "y"){print "${shspc}_$F[2]_gene.tpm ";}' -- -shspc=$i ~/Downloads/RNA-Seq_data_used.txt`
+  echo $i
+  ~/DT_modules/bindfpkm.pl -g 1 -d 2 -p "${files}" > ~/Downloads/${i}_all_gene_tpm.txt
+done

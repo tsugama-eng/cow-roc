@@ -1,0 +1,2334 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COW-ROC: a codon weight and ribosome-occupied codon utilization platform</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f7fa; color: #333; }
+        h1 { border-bottom: 3px solid #0066cc; padding-bottom: 10px; color: #0066cc; }
+        h2 { color: #444; border-left: 5px solid #0066cc; padding-left: 10px; font-size: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e1e8ed; }
+        textarea { width: 100%; height: 120px; font-family: monospace; box-sizing: border-box; padding: 10px; }
+        select, button, input[type="range"] { width: 100%; padding: 10px; margin-top: 10px; font-size: 16px; box-sizing: border-box; }
+        button { background: #0066cc; color: white; border: none; cursor: pointer; font-weight: bold; }
+        .output { background: #eef5fc; padding: 15px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-break: break-all; border-left: 4px solid #0066cc; margin-top: 15px; max-height: 200px; overflow-y: auto; }
+        .logo-container { display: flex; justify-content: center; align-items: flex-end; height: 150px; border-bottom: 2px solid #333; margin: 20px 0; background: #fafafa; }
+        .logo-letter { font-weight: bold; text-align: center; font-family: Arial, sans-serif; display: block; line-height: 0.8; transform-origin: bottom center; width: 45px; }
+        .letter-A { color: #228b22; } .letter-T { color: #ff0000; } .letter-C { color: #0000ff; } .letter-G { color: #ffa500; }
+       .btn-group { display: flex; gap: 10px; margin-top: 15px; width: 100%; }
+       .btn-group button { flex: 1; padding: 12px 5px; font-size: 14px; font-weight: bold; color: white; border: none; cursor: pointer; border-radius: 4px; transition: background 0.2s; text-align: center; }
+       
+       /* ボタンごとのカラースキーム */
+       #runBtn { background: #0066cc; }
+       #runBtn:hover { background: #0052a3; }
+       #copyBtn { background: #31708f; }
+       #copyBtn:hover:not(:disabled) { background: #245269; }
+       #downloadBtn { background: #555555; }
+       #downloadBtn:hover:not(:disabled) { background: #333333; }
+       #clearBtn { background: #a94442; }
+       #clearBtn:hover { background: #843534; }
+       
+       button:disabled { background: #cccccc !important; cursor: not-allowed; opacity: 0.6; }
+    </style>
+    <link rel="icon" type="image/png" href="cow-roc.png">
+</head>
+<body>
+
+    <!-- Replace your existing <h1> tag block with this -->
+    <div style="display: flex; flex-direction: column; border-bottom: 3px solid #0066cc; padding-bottom: 10px; margin-bottom: 20px; gap: 5px;">
+        <div style="display: flex; justify-content: flex-start; align-items: center; gap: 15px;">
+            <h1 style="margin: 0; padding: 0; color: #000000; border-bottom: none; line-height: 1.1;">COW-ROC</h1>
+            <!-- cow.png is now placed directly to the right of COW-ROC -->
+            <img src="cow-roc.png" alt="COW-ROC Logo" style="max-height: 55px; width: auto; object-fit: contain;">
+        </div>
+        <span style="font-size: 24px; font-weight: normal; color: #000000; line-height: 1.2;">Codon weight and ribosome-occupied codon utilization platform</span>
+    </div>
+    
+    <div class="grid">
+        <div class="card">
+            <h2 style="margin-top: 0px;">1. Codon Optimization Engine</h2>
+            <textarea id="sequenceInput" placeholder="Paste sequence here... e.g., ATGTGGCCG..."></textarea>
+            
+            <div style="margin-top: 10px; background: #fafafa; padding: 10px; border: 1px dashed #bbb; border-radius: 4px;">
+              <label style="font-size: 13px; font-weight: bold; color: #555; display: block; margin-bottom: 5px;">📂 Or upload multi-FASTA file (e.g., .fasta, .fa, .txt):</label>
+              <input type="file" id="fastaFileInput" accept=".fasta,.txt,.fa,.fna" onchange="handleFastaUpload(this)" style="font-size: 13px; width: 100%;">
+            </div>
+            
+            <h4 style="margin-bottom:0px;">Model (codon weights)</h4>
+            
+            <select id="speciesSelect" onchange="updateBrowser(document.getElementById('siteSlider').value)">
+                <option value="user_custom" id="customOption" disabled>★ User-uploaded pipeline model</option>
+                <optgroup label="Protein abundance (PA)-derived models">
+                    <option value="Arabidopsis_thaliana_pa">Arabidopsis thaliana (Thale cress) - PA-based</option>
+                    <option value="Oryza_sativa_pa">Oryza sativa (Rice) - PA-based</option>
+                    <option value="Homo_sapiens_pa" selected>Homo sapiens (Human) - PA-based</option>
+                    <option value="Mus_musculus_pa">Mus musculus (Mouse) - PA-based</option>
+                    <option value="Drosophila_melanogaster_pa">Drosophila melanogaster (Fruit fly) - PA-based</option>
+                    <option value="Saccharomyces_cerevisiae_pa">Saccharomyces cerevisiae (Baker's yeast) - PA-based</option>
+                    <option value="Escherichia_coli_pa">Escherichia coli (E. coli) - PA-based</option>
+                </optgroup>
+
+                <!-- TRANSCRIPTOME BASED MODELS (TPM-Based: 29 Organisms) -->
+                <optgroup label="Transcriptome (TPM)-derived models">
+                    <!-- Monocots / Crops -->
+                    <option value="Oryza_sativa_tpm">Oryza sativa (Rice)</option>
+                    <option value="Triticum_aestivum_tpm">Triticum aestivum (Common wheat)</option>
+                    <option value="Zea_mays_tpm">Zea mays (Corn / Maize)</option>
+                    <option value="Sorghum_bicolor_tpm">Sorghum bicolor (Sorghum)</option>
+                    <option value="Hordeum_vulgare_tpm">Hordeum vulgare (Barley)</option>
+                    <option value="Cenchrus_americanus_tpm">Cenchrus americanus (Pearl millet)</option>
+                    <option value="Ananas_comosus_tpm">Ananas comosus (Pineapple)</option>
+                    <option value="Musa_acuminata_tpm">Musa acuminata (Wild banana)</option>
+                    <option value="Asparagus_officinalis_tpm">Asparagus officinalis (Garden asparagus)</option>
+                    <option value="Allium_cepa_tpm">Allium cepa (Onion)</option>
+                    <!-- Dicots / Trees / Model Plants -->
+                    <option value="Populus_trichocarpa_tpm">Populus trichocarpa (Black cottonwood)</option>
+                    <option value="Malus_domestica_tpm">Malus domestica (Apple)</option>
+                    <option value="Vitis_vinifera_tpm">Vitis vinifera (Common grape vine)</option>
+                    <option value="Citrus_clementina_tpm">Citrus clementina (Clementina)</option>
+                    <option value="Arabidopsis_thaliana_tpm">Arabidopsis thaliana (Thale cress)</option>
+                    <option value="Brassica_rapa_tpm">Brassica rapa (Field mustard)</option>
+                    <option value="Solanum_lycopersicum_tpm">Solanum lycopersicum (Tomato)</option>
+                    <option value="Glycine_max_tpm">Glycine max (Soybean)</option>
+                    <option value="Chenopodium_quinoa_tpm">Chenopodium quinoa (Quinoa)</option>
+                    <!-- Algae / Moss -->
+                    <option value="Physcomitrium_patens_tpm">Physcomitrium patens (Spreading earthmoss)</option>
+                    <option value="Chlamydomonas_reinhardtii_tpm">Chlamydomonas reinhardtii (Green alga)</option>
+                    <!-- Fungi / Metazoa -->
+                    <option value="Saccharomyces_cerevisiae_tpm">Saccharomyces cerevisiae (Baker's yeast)</option>
+                    <option value="Homo_sapiens_tpm">Homo sapiens (Human)</option>
+                    <option value="Mus_musculus_tpm">Mus musculus (Mouse)</option>
+                    <option value="Drosophila_melanogaster_tpm">Drosophila melanogaster (Fruit fly)</option>
+                    <!-- Bacteria -->
+                    <option value="Escherichia_coli_tpm">Escherichia coli (E. coli)</option>
+                    <option value="Bacillus_subtilis_tpm">Bacillus subtilis (Hay bacillus)</option>
+                    <option value="Mycobacterium_tuberculosis_tpm">Mycobacterium tuberculosis (Tubercle bacillus)</option>
+                    <option value="Salmonella_enterica_tpm">Salmonella enterica (Salmonella)</option>
+                </optgroup>
+            </select>
+
+        <div class="btn-group">
+          <button id="runBtn" onclick="optimizeCodons()">🚀 Run</button>
+          <button id="copyBtn" onclick="copyToClipboard()" disabled>📋 Copy</button>
+          <button id="downloadBtn" onclick="downloadFastaOutput()" disabled>💾 Download</button>
+          <button id="clearBtn" onclick="clearAllInputs()">🧹 Clear</button>
+        </div>
+            <div id="optimizationOutput" class="output">The optimized sequence will appear here...</div>
+        </div>
+
+       <!-- 右側：ユーザー提供データからの回帰エンジン（セクション2） -->
+       <div class="card">
+           <h2 style="margin-top: 0px;">2. Codon Weight Acquisition Pipeline</h2>
+           <!-- Positioned above files to serve as a logical workflow checkpoint -->
+           <div style="background: #edf7ed; border-left: 4px solid #228b22; padding: 10px; margin-bottom: 15px; border-radius: 0 4px 4px 0; font-size: 12px; color: #1e4620; line-height: 1.4;">
+               <strong>💡 Advanced workflow:</strong> If you only need preset organism models, you can safely skip this pipeline. To train a custom model, upload your files below—the calculated weights will be injected into the left optimization engine instantly.
+           </div>
+           <div style="margin-bottom: 12px; font-size: 13px; color: #555;">
+               📊 Upload a multi-FASTA CDS file and an expression profile matrix (e.g., TPM or protein abundance) to obtain custom codon weights.
+           </div>
+           
+              
+           <!-- コントロールコンソール -->
+           <div style="background: #fafafa; padding: 12px; border-radius: 6px; border: 1px solid #e1e8ed; margin-bottom: 15px;">
+               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                   <div>
+                       <label style="font-size: 11px; font-weight: bold; color: #444; display: block; margin-bottom: 2px;">📂 Multi-FASTA CDS file (e.g., .fa, .cds, .txt):</label>
+                       <input type="file" id="codonFile" accept=".fa,.fasta,.cds,.txt" style="font-size: 12px; width: 100%;">
+                   </div>
+                   <div>
+                       <label style="font-size: 11px; font-weight: bold; color: #444; display: block; margin-bottom: 2px;">📂 Expression profile file (e.g., .tsv, .csv, .txt):</label>
+                       <input type="file" id="tpmFile" accept=".txt,.tsv,.csv" style="font-size: 12px; width: 100%;">
+                   </div>
+               </div>
+       
+               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; align-items: center;">
+                   <div>
+                       <label style="font-size: 11px; font-weight: bold; color: #444; display: block; margin-bottom: 2px;">⚙️ Expression min-threshold:</label>
+                       <input type="number" id="pipelineThreshold" value="0.0" step="0.1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+                   </div>
+                   <div>
+                       <label style="font-size: 11px; font-weight: bold; color: #444; display: block; margin-bottom: 2px;">📐 Abundance log transformation:</label>
+                       <select id="pipelineLogTransform" style="margin-top: 0; padding: 6px; font-size: 13px;">
+                           <option value="log1p" selected>log1p (ln(x + 1))</option>
+                           <option value="log10">log10 (log10(x))</option>
+                           <option value="none">none (Linear scale)</option>
+                       </select>
+                   </div>
+               </div>
+       
+               <div style="display: flex; gap: 8px;">
+                   <button id="demoBtn" onclick="loadDemoPipelineData()" style="background: #ee8c00; width: 35%; padding: 10px; font-size: 14px;">🧪 Load <i>E.coli</i> demo</button>
+                   <button id="runRegressionBtn" onclick="executeWebPipelineRegression()" style="background: #008bee; flex: 1; padding: 10px; font-size: 14px;">⚡ Run linear regression</button>
+               </div>
+               
+               <div id="pipelineStatus" style="font-size: 11px; font-weight: bold; margin-top: 8px; color: #666; text-align: center;">
+                   Awaiting file uploads or demo dataset ingestion...
+               </div>
+           </div>
+       
+           <!-- 結果出力コンソール -->
+           <div>
+               <h3 style="font-size:13px; margin: 5px 0; color: #444;">Regression log:</h3>
+               <div id="customWeightOutput" class="output" style="height: 180px; max-height: 180px; background: #f4f9f4; border-left: 4px solid #228b22; margin-top: 0;">
+                   The trained regression parameters and ranked coefficients (codon weights) will appear here...
+               </div>
+           </div>
+       
+           <!-- ファイルダウンロード & 散布図プロット -->
+           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; align-items: start;">
+               <div id="plotContainer" style="display: none; text-align: center;">
+                   <h3 style="font-size:12px; margin: 0 0 5px 0; color: #444;">Parity scatter plot</h3>
+                   <canvas id="regressionPlot" width="220" height="150" style="width:100%; max-width:220px; border:1px solid #e1e8ed; background:#fff; margin:0 auto;"></canvas>
+               </div>
+               <div>
+                   <h3 style="font-size:13px; margin: 0 0 5px 0; color: #444;">Export trained data:</h3>
+                   <button id="btnDlCoeffs" onclick="downloadPipelineCoeffs()" disabled style="background: #555; padding: 8px; font-size: 12px; margin-bottom: 8px;">💾 Download coefficients (weights) (.tsv)</button>
+                   <button id="btnDlPreds" onclick="downloadPipelinePreds()" disabled style="background: #555; padding: 8px; font-size: 12px;">💾 Download predictions (.tsv)</button>
+               </div>
+            </div>
+         </div>
+    </div>
+    
+    <!-- LOWER ROW: Full Width Ribosome Profiling Analytics Browser -->
+    <div class="card" style="margin-top: 20px; width: 100%; box-sizing: border-box;">
+        <h2 style="margin-top: 0px;">3. Ribo-seq-Weighted Cumulative Codon Frequency Browser</h2>
+        <div style="margin-bottom: 12px; font-size: 13px; color: #555;">
+            <!-- Updated range descriptions -->
+              📊 Select a dataset below to analyze codon densities (-30 to +30 sites relative to the P-site). Toggle the comparative layer to view cross-species contrast variations (Δ view).
+        </div>
+
+        <!-- Independent Control Console for Section 3 Analytics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; background: #fafafa; padding: 15px; border-radius: 6px; border: 1px solid #e1e8ed; align-items: center; box-sizing: border-box;">
+            <div>
+                <label for="riboSpeciesSelect" style="font-size: 12px; font-weight: bold; color: #444; display: block; margin-bottom: 4px;">🔬 Select Ribo-seq Organism Dataset:</label>
+                <select id="riboSpeciesSelect" onchange="loadIndependentRiboData(this.value)" style="margin-top: 0; padding: 8px; width: 100%; max-width: 320px; box-sizing: border-box;">
+                    <option value="Arabidopsis_thaliana">Arabidopsis thaliana (Thale cress) </option>
+                    <option value="Oryza_sativa">Oryza sativa (Rice) </option>
+                    <option value="Homo_sapiens" selected>Homo sapiens (Human) </option>
+                    <option value="Mus_musculus">Mus musculus (Mouse) </option>
+                    <option value="Drosophila_melanogaster">Drosophila melanogaster (Fruit fly) </option>
+                    <option value="Saccharomyces_cerevisiae">Saccharomyces cerevisiae (Baker's yeast) </option>
+                    <option value="Escherichia_coli">Escherichia coli (E. coli) </option>
+                </select>
+            </div>
+
+            <!-- NEW: Independent Contrast Baseline Selection Menu -->
+            <div>
+                 <label for="riboBaselineSelect" style="font-size: 12px; font-weight: bold; color: #444; display: block; margin-bottom: 4px;">🎯 Select contrast baseline reference:</label>
+                 <select id="riboBaselineSelect" onchange="updateRiboBrowser()" style="margin-top: 0; padding: 6px; width: 100%; box-sizing: border-box; background: #ffffff;">
+                    <option value="Arabidopsis_thaliana">Arabidopsis thaliana (Thale cress)</option>
+                    <option value="Oryza_sativa">Oryza sativa (Rice)</option>
+                    <option value="Homo_sapiens">Homo sapiens (Human)</option>
+                    <option value="Mus_musculus" selected>Mus musculus (Mouse)</option>
+                    <option value="Drosophila_melanogaster">Drosophila melanogaster (Fruit fly)</option>
+                    <option value="Saccharomyces_cerevisiae">Saccharomyces cerevisiae (Baker's yeast)</option>
+                    <option value="Escherichia_coli">Escherichia coli (E. coli)</option>
+                </select>
+            </div>
+    
+            <div>
+                <label style="font-size: 12px; font-weight: bold; color: #444; display: block; margin-bottom: 4px;">🌐 View mode:</label>
+                <div class="view-toggle" style="display: flex; gap: 4px; margin-top: 0;">
+                    <button type="button" id="viewAbsoluteBtn" class="active" onclick="toggleComparisonView('absolute')" style="padding: 8px; font-size: 13px; cursor: pointer;">Single species profile</button>
+                    <button id="viewContrastBtn" onclick="toggleComparisonView('contrast')" style="padding: 8px; font-size: 13px;">Species contrast (Δ view)</button>
+                </div>
+            </div>
+            <div>
+                <label style="font-size: 12px; font-weight: bold; color: #444; display: block; margin-bottom: 4px;">🔒 Filtering options:</label>
+                <div style="background: #fffbf0; padding: 6px 10px; border: 1px solid #f0e4b8; border-radius: 4px; display: flex; align-items: center; gap: 8px; height: 38px; box-sizing: border-box;">
+                    <input type="checkbox" id="hideStopCodonsCheck" checked onchange="toggleStopCodonsView()" style="width: auto; margin: 0; cursor: pointer;">
+                    <label for="hideStopCodonsCheck" style="font-size: 12px; font-weight: bold; color: #843534; cursor: pointer; user-select: none;">Hide stop codons</label>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px; border-top: 1px dashed #f0e4b8; padding-top: 4px;background: #fffbf0; padding: 6px 10px; border: 1px solid #f0e4b8; border-radius: 4px; display: flex; align-items: center; gap: 8px; height: 38px; box-sizing: border-box;">
+                    <input type="checkbox" id="aggregateSynonymousCheck" onchange="toggleSynonymousAggregationView()" style="width: auto; margin: 0; cursor: pointer;">
+                    <label for="aggregateSynonymousCheck" style="font-size: 12px; font-weight: bold; color: #843534; cursor: pointer; user-select: none;">Aggregate to amino acid profiles</label>
+                </div>
+
+            </div>
+        </div>
+        
+        <!-- Positional Nucleotide Metrics Profile -->
+        <div style="margin-top: 15px;">
+        <!-- Dual Chart Presentation Matrix Frame -->
+        <!-- Optimized: Left side contains charts, Right side nests WebLogo and Console vertically -->
+        <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; margin-top: 15px; align-items: start;">
+            
+            <!-- Left Column: Multi-Line Charts + Heatmap + Dynamic Gradient Scales -->
+            <div style="display: flex; flex-direction: column; width: 100%; gap: 10px;">
+                
+                <!-- 1. Positional Nucleotide Metrics Line Chart Tracker -->
+                <div>
+                    <h3 style="font-size:12px; margin: 0 0 5px 0; color: #444;">📊 Positional nucleotide metrics profile (GC, GC3, GT3, GA3)</h3>
+                    <canvas id="riboMetricsLineChart" width="640" height="100" style="width:100%; height: 100px; border:1px solid #e1e8ed; background:#fff; border-radius: 4px; box-sizing: border-box;"></canvas>
+                </div>
+
+                <!-- NEW: Integrated Color Density Scale Reference Gauge Widget -->
+                <div id="heatmapColorBarContainer" style="display: flex; align-items: center; justify-content: space-between; background: #fafafa; padding: 6px 12px; border: 1px solid #e1e8ed; border-radius: 4px; box-sizing: border-box; font-family: sans-serif;">
+                    <span id="scaleMinLabel" style="font-size: 10px; color: #666; font-weight: bold;">Min frequency</span>
+                    <!-- Dynamic color container block filled via context rules inside drawing runtime -->
+                    <div id="gradientVisualScale" style="flex-grow: 1; margin: 0 15px; height: 12px; border: 1px solid #ccc; border-radius: 2px;"></div>
+                    <span id="scaleMaxLabel" style="font-size: 10px; color: #666; font-weight: bold;">Max frequency</span>
+                </div>
+
+                <!-- 2. Main Heatmap Presentation Matrix Grid -->
+                <div>
+                    <canvas id="riboHeatmap" width="640" height="340" style="width:100%; height: auto; border:1px solid #e1e8ed; cursor:crosshair; background:#fff; border-radius: 4px; box-sizing: border-box;"></canvas>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; background: #fafafa; padding: 10px; border-radius: 4px; border: 1px solid #ddd; box-sizing: border-box; gap: 15px;">
+                        <div style="font-size:13px; font-weight: bold; color: #333; white-space: nowrap;">Selected codon site: <span id="riboPosValue" style="color:#0066cc;">0 (P-site)</span></div>
+                        <input type="range" id="riboSlider" min="0" max="60" value="30" oninput="selectRiboPosition(this.value)" style="flex-grow: 1; margin: 0; cursor: pointer;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Vertical Presentation Framework Blocks -->
+            <div style="display: flex; flex-direction: column; gap: 15px; width: 100%;">
+                <!-- 3. WebLogo Container Framework Frame -->
+                <div style="border: 1px solid #e1e8ed; border-radius: 4px; padding: 12px 15px; background: #fff; box-sizing: border-box; height: 175px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <h3 style="margin-top:0; margin-bottom: 4px; font-size:13px; color:#444; border-bottom:1px solid #eee; padding-bottom:4px;">Sequence logo by position</h3>
+                    <div class="logo-container" id="riboLogoContainer" style="border:none; background:transparent; margin:0; padding:0; height:120px; width: 100%;"></div>
+                </div>
+
+                <!-- 4. Dynamic Diagnostic Analytics Console Log Node -->
+                <div style="border: 1px solid #e1e8ed; border-radius: 4px; padding: 12px 15px; background: #fff; box-sizing: border-box; height: 310px; display: flex; flex-direction: column;">
+                    <h3 style="margin-top:0; margin-bottom: 6px; font-size:13px; color:#444; border-bottom:1px solid #eee; padding-bottom:4px;">📋 Metrics at the selected site</h3>
+                    <div id="riboMetricsConsole" style="font-size:11px; background:#f4f9f4; border-left: 4px solid #228b22; padding:10px; border-radius:0 4px 4px 0; font-family: monospace; line-height: 1.4; box-sizing: flex-grow: 1; overflow-y: auto;">
+                        Select a ribosome site along the matrix tracker to dump numerical codon densities and nucleobase frequencies...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div></div>
+    
+    <!-- Section 4: Data download platform -->
+    <div class="card" style="margin-top: 20px; width: 100%; box-sizing: border-box;">
+    <h2 style="margin-top: 0px; margin-bottom: 20px;">4. Data Download Platform</h2>
+    <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 4px;">
+        
+        <!-- Card 1: Reference Organism Preset Weights -->
+        <!-- 💡 解説: flex と column を指定して縦並びの制御を有効化 -->
+        <div class="card" style="display: flex; flex-direction: column; height: 100%; box-sizing: border-box;">
+            <h2 style="margin-top: 0; font-size: 18px; border-left: 5px solid #0066cc; padding-left: 10px; margin-bottom: 0px;">Pre-calculated codon weight models</h2>
+            
+            <!-- 💡 解説: margin-bottom: auto; を指定することで、下のボタンを最下部へ押し出します -->
+            <p style="font-size: 13px; color: #555; margin-bottom: auto; padding-bottom: 0px;">
+                Download the complete collection of pre-calculated codon weight models. These models were generated using an offline Python pipeline similar to the one implemented on this website; please note that minor variations in calculated weights may exist between the two pipelines. For full methodology and dataset details, see the references given below.
+            </p>
+            
+            <div class="btn-group" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                <a href="models/all_codon_weights.zip" download="all_codon_weights.zip" style="display: block; text-align: center; background: #0066cc; color: white; text-decoration: none; padding: 12px 5px; font-size: 14px; font-weight: bold; border-radius: 4px; transition: background 0.2s; box-sizing: border-box; width: 100%;">
+                    📥 Download all codon weight models (.zip)
+                </a>
+            </div>
+        </div>
+    
+        <!-- Card 2: Pipeline Testing & Demo Datasets (Section 2 Workflow) -->
+        <div class="card" style="display: flex; flex-direction: column; height: 100%; box-sizing: border-box;">
+            <h2 style="margin-top: 0; font-size: 18px; border-left: 5px solid #228b22; padding-left: 10px; margin-bottom: 0px;">Codon weight acquisition demo dataset</h2>
+            <!-- 💡 解説: ここにも margin-bottom: auto; を適用してボタンを最下部へ固定 -->
+            <p style="font-size: 13px; color: #555; margin-bottom: auto; padding-bottom: 0px;">
+                Download the <i>E. coli</i> CDS and protein abundance data for the codon weight acquisition demo. Note: Gene IDs do not 100% match between these data.
+            </p>
+            
+            <div class="btn-group" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                <a href="demo/Escherichia_coli_demo_dataset.zip" download="Escherichia_coli_demo_dataset.zip" style="display: block; text-align: center; background: #008866; color: white; text-decoration: none; padding: 12px 5px; font-size: 14px; font-weight: bold; border-radius: 4px; transition: background 0.2s; box-sizing: border-box; width: 100%;">
+                    📦 Download codon weight acquisition demo data (.zip)
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 4px;">
+        
+        <!-- Card 3: Ribo-seq Occupancy Profiles -->
+        <!-- 💡 解説: 1番目のカードと全く同じCSS構造を適用 -->
+        <div class="card" style="display: flex; flex-direction: column; height: 100%; box-sizing: border-box;">
+            <h2 style="margin-top: 0; font-size: 18px; border-left: 5px solid #ff8c00; padding-left: 10px; margin-bottom: 0px;">Ribo-seq-weighted cumulative codon frequencies</h2>
+            
+            <!-- 💡 解説: ここにも margin-bottom: auto; を適用してボタンを最下部へ固定 -->
+            <p style="font-size: 13px; color: #555; margin-bottom: auto; padding-bottom: 0px;">
+                Download the Ribo-seq-weighted cumulative codon frequency datasets for a 101-codon window (larger than the 61-codon window used on this website) from seven model species. Available as a single compressed archive.
+            </p>
+            
+            <div class="btn-group" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                <a href="ribo-seq/all_ribo-seq-weighted_codon_frequency.zip" download="all_ribo-seq-weighted_codon_frequency.zip" style="display: block; text-align: center; background: #ff8c00; color: white; text-decoration: none; padding: 12px 5px; font-size: 14px; font-weight: bold; border-radius: 4px; transition: background 0.2s; box-sizing: border-box; width: 100%;">
+                    📦 Download all Ribo-seq-weighted codon frequency data (.zip)
+                </a>
+            </div>
+        </div>
+
+        <!-- Card 4: Graphics Export Only (Section 3 Analytics) -->
+        <div class="card" style="display: flex; flex-direction: column; height: 100%; box-sizing: border-box;">
+            <h2 style="margin-top: 0; font-size: 18px; border-left: 5px solid #ee00cc; padding-left: 10px; margin-bottom: 0px;">Export active heatmap canvas</h2>
+            <p style="font-size: 13px; color: #555; margin-bottom: auto;">
+                Directly capture the currently rendered heatmap from the Ribo-seq-weighted cumulative codon frequency dataset. This action extracts live image data directly from the active session runtime.
+            </p>
+            <div class="btn-group" style="display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 15px;">
+                <button id="btnExportHeatmap" onclick="exportBrowserGraphics()" style="display: block; text-align: center; background: #ee00cc; color: white; border: none; padding: 12px 5px; font-size: 14px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: background 0.2s; box-sizing: border-box; width: 100%;">
+                    🖼️ Export heatmap profile (.png)
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Section 5: References -->
+    <!-- 💡 他のカードと完全に統一するため、余計なborder-topを排除してクラスと幅を設定 -->
+    <div class="card" style="margin-top: 20px; width: 100%; box-sizing: border-box;">
+        <!-- 💡 見出しのスタイル（青い左バー、文字色、フォントサイズ）をセクション1〜4と統一 -->
+        <h2 style="margin-top: 0; font-size: 20px; color: #444; border-left: 5px solid #0066cc; padding-left: 10px;">5. References</h2>
+        
+        <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px;">
+                    
+            <!-- Reference Item 1: Main Publication -->
+            <div style="font-size: 13px; line-height: 1.5; color: #444; padding-left: 15px; border-left: 3px solid #0066cc;">
+                <!-- 💡 [Main Publication] ラベルを付与して論文であることを明示 -->
+                <span style="font-size: 11px; font-weight: bold; color: #0066cc; display: block; margin-bottom: 2px;">[Main publication]</span>
+                <span style="font-weight: bold; color: #222;">[1] Tsugama D, Kambara K (2026) 
+                Decoding universal principles of codon-mediated regulation of gene expression.</span>
+                <i>bioRxiv</i> 
+                <a href="https://doi.org/10.64898/2026.05.27.728126" target="_blank" rel="noopener noreferrer" style="color: #0066cc; text-decoration: none; font-family: monospace; font-size: 12px; margin-left: 5px;">https://doi.org/10.64898/2026.05.27.728126</a>
+            </div>
+        
+            <!-- Reference Item 2: Repository Data & Code -->
+            <div style="font-size: 13px; line-height: 1.5; color: #444; padding-left: 15px; border-left: 3px solid #228b22;">
+                <!-- 💡 [Data & Code Repository] ラベルを付与してリポジトリであることを明示 -->
+                <span style="font-size: 11px; font-weight: bold; color: #228b22; display: block; margin-bottom: 2px;">[Data and code repository]</span>
+                <span style="font-weight: bold; color: #222;">[2] Tsugama D, Kambara K (2026)
+                Data and Code for: Decoding universal principles of codon-mediated regulation of gene expression.</span> 
+                <i>Figshare</i>
+                <a href="https://doi.org/10.6084/m9.figshare.32414811" target="_blank" rel="noopener noreferrer" style="color: #0066cc; text-decoration: none; font-family: monospace; font-size: 12px; margin-left: 5px;">https://doi.org/10.6084/m9.figshare.32414811</a>
+            </div>
+        
+            <!-- Reference Item 3 (Dataset Reference if needed) -->
+            <div style="font-size: 13px; line-height: 1.5; color: #666; padding-left: 15px; border-left: 3px solid #e1e8ed; font-style: italic;">
+                Note: Public Ribo-seq datasets utilized to compile these profiles were originally retrieved from the NCBI Gene Expression Omnibus (GEO) and the Sequence Read Archive (SRA). For individual accession codes mapping to each organism model, please see the materials of the references listed above.
+            </div>
+        
+        </div>
+    </div>
+    
+<!-- Section 6: Help & Documentation -->
+    <div class="card" style="margin-top: 20px; width: 100%; box-sizing: border-box;">
+        <h2 style="margin-top: 0; font-size: 20px; color: #444; border-left: 5px solid #0066cc; padding-left: 10px;">6. Help & Documentation</h2>
+        
+        <!-- Platform Overview Matrix Display Panel -->
+        <div style="background: #fafafa; border: 1px solid #e1e8ed; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; line-height: 1.5; color: #333;">
+            <strong>📌 Quick Platform Overview:</strong>
+            <ul style="margin: 5px 0 0 0; padding-left: 20px; color: #444;">
+                <li><strong>Section 1 (Codon Optimization Engine):</strong> Engineers and synthesizes open reading frames using pre-calculated or custom codon weight models.</li>
+                <li><strong>Section 2 (Codon Weight Acquisition Pipeline):</strong> Resolves de novo codon weights from a user-uploaded expression matrix and sequence datasets. The expression matrix supports CSV, TSV, or TXT formats (comma- or tab-separated) and must include the gene ID in the first column.</li>
+                <li><strong>Section 3 (Ribo-seq-weighted Cumulative Codon Frequency Browser):</strong> Tracks absolute and comparative cross-species Ribo-seq-weighted cumulative codon frequencies across a 61-base window centered on the P-site.</li>
+                <li style="margin-top: 5px; color: #1e4620; font-weight: bold;">🔒 Data Privacy: This platform is built 100% in HTML/JavaScript. Your input sequences and expression datasets are processed entirely within your local browser memory, ensuring complete data confidentiality with zero server-side data egress.</li>
+            </ul>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+            <!-- Left Column: Core Workflow Target Focus -->
+            <div>
+                <h3 style="color: #0066cc; font-size: 15px; margin-top: 0;">🔄 Core Workflow: Custom Codon Weight Derivation &amp; Optimization</h3>
+                <p style="font-size: 13px; line-height: 1.6; color: #444; margin-bottom: 10px;">
+                      To calculate custom codon weights and apply them directly to codon optimization, you can transfer data directly from <strong>Section 2 to Section 1</strong> using the following pipeline steps:
+                </p>
+                
+                <div style="background: #edf7ed; border-left: 4px solid #228b22; padding: 12px; border-radius: 0 4px 4px 0; font-size: 13px;">
+                    <ol style="margin: 0; padding-left: 20px; line-height: 1.6; color: #333;">
+                        <li style="margin-bottom: 6px;"><strong>Upload datasets in Section 2:</strong> Input your multi-FASTA CDS file and expression profile matrix. If the matrix contains multiple experimental conditions, the platform automatically log-transforms and averages the expression values by gene for regression.</li>
+                        <li style="margin-bottom: 6px;"><strong>Run linear regression:</strong> Adjust your expression thresholds and preferred log scaling modes, then click <code>[Run linear regression]</code>. A simple linear regression will be applied to calculate codon weights and predict expression values.</li>
+                        <li style="margin-bottom: 6px;"><strong>Pipeline transmission to Section 1:</strong> The computed codon weights are automatically transmitted and loaded into Section 1 under the <strong>"★ User-uploaded pipeline model"</strong> dropdown menu option.</li>
+                        <li style="margin-bottom: 0;"><strong>Optimize codons:</strong> Select this newly activated custom model option in Section 1, paste your target sequence, and click <code>[Run]</code> to generate a codon-optimized sequence based on your custom codon weights.</li>
+                    </ol>
+                </div>
+            </div>
+
+            <!-- Right Column: Downstream Visual Interpretation Guidelines -->
+            <div>
+                <h3 style="color: #0066cc; font-size: 15px; margin-top: 0;">📊 Data interpretation</h3>
+                
+                <h4 style="font-size: 13px; margin: 0 0 5px 0; color: #333;">1. Codon weights (Section 1 &amp; 2 input and output)</h4>
+                <p style="font-size: 13px; line-height: 1.5; color: #555; margin-bottom: 12px; padding-left: 5px;">
+                    Codon weights capture whether specific codons act as positive or negative drivers of transcript or protein abundance. High positive codon weights are prioritized during codon optimization. Codon weights are shaped by species-specific cellular environments of mRNA and protein synthesis and turnover.
+                </p>
+
+                <h4 style="font-size: 13px; margin: 12px 0 5px 0; color: #333;">2. Ribo-seq-weighted cumulative codon frequencies (Section 3 browser)</h4>
+                <p style="font-size: 13px; line-height: 1.5; color: #555; margin-bottom: 12px; padding-left: 5px;">
+                    Ribo-seq-weighted cumulative codon frequencies capture the codon frequencies associated with ribosome-stalling sites. The 61-base window is centered on the P-site, where position 0 corresponds to the P-site. The positions from -5 to 5 correspond to the ribosome-occupied sites, which are visualized in the heatmap using distinct color patterns to differentiate them from the surrounding sites.
+                </p>
+                <ul style="font-size: 13px; padding-left: 20px; line-height: 1.5; color: #555;">
+                    <li style="margin-bottom: 5px;"><strong>Absolute density profile:</strong> Displays a heatmap based on absolute frequency data. Unchecking "Hide stop codons" displays stop codon frequencies. In vertebrates and plants, these frequencies are so dominant at the A-site that they obscure the color variations of other codons.</li>
+                    <li style="margin-bottom: 5px;"><strong>Species contrast (Δ view):</strong> Displays a heatmap based on differential frequency data between two selected species. High absolute delta values (|Δ|) pinpoint codons with significant frequency differences around the ribosome-stalling sites between those species.</li>
+                    <li style="margin-bottom: 0;"><strong>Amino acid aggregation:</strong> Displays a heatmap based on frequency data aggregated by synonymous codons. This option allows users to explore the relevance of amino acids to ribosome stalling rather than the effects of individual codons.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+       
+    <script>
+    // =========================================================================
+    // --- 1. BIOLOGICAL & MATHEMATICAL REGISTRY (DECLARED ONCE) ---
+    // =========================================================================
+    var AA_TABLE = {
+        'A': ['GCT', 'GCC', 'GCA', 'GCG'], 'C': ['TGT', 'TGC'], 'D': ['GAT', 'GAC'],
+        'E': ['GAA', 'GAG'], 'F': ['TTT', 'TTC'], 'G': ['GGT', 'GGC', 'GGA', 'GGG'],
+        'H': ['CAT', 'CAC'], 'I': ['ATT', 'ATC', 'ATA'], 'K': ['AAA', 'AAG'],
+        'L': ['TTA', 'TTG', 'CTT', 'CTC', 'CTA', 'CTG'], 'M': ['ATG'],
+        'N': ['AAT', 'AAC'], 'P': ['CCT', 'CCC', 'CCA', 'CCG'], 'Q': ['CAA', 'CAG'],
+        'R': ['CGT', 'CGC', 'CGA', 'CGG', 'AGA', 'AGG'], 'S': ['TCT', 'TCC', 'TCA', 'TCG', 'AGT', 'AGC'],
+        'T': ['ACT', 'ACC', 'ACA', 'ACG'], 'V': ['GTT', 'GTC', 'GTA', 'GTG'],
+        'W': ['TGG'], 'Y': ['TAT', 'TAC'], '*': ['TAA', 'TAG', 'TGA']
+    };
+    
+    const BIOLOGICAL_AA_ORDER = [
+    'A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V', '*'
+     ];
+     // 3文字表記への変換マップ（Y軸のレーベル用）
+     const AA_TO_3LETTER = {
+        'A':'ALA', 'R':'ARG', 'N':'ASN', 'D':'ASP', 'C':'CYS', 'Q':'GLN', 'E':'GLU', 'G':'GLY',
+        'H':'HIS', 'I':'ILE', 'L':'LEU', 'K':'LYS', 'M':'MET', 'F':'PHE', 'P':'PRO', 'S':'SER',
+        'T':'THR', 'W':'TRP', 'Y':'TYR', 'V':'VAL', '*':'STP'
+    };
+    
+    var CODONS = [];
+    var BASES = ["A", "T", "G", "C"];
+    for(var a=0; a<4; a++) {
+        for(var b=0; b<4; b++) {
+            for(var c=0; c<4; c++) { CODONS.push(BASES[a] + BASES[b] + BASES[c]); }
+        }
+    }
+    CODONS.sort();
+    
+    var CODON_INDEX = {};
+    for(var i=0; i<64; i++) { CODON_INDEX[CODONS[i]] = i; }
+
+    var CODON_TO_AA = {};
+    Object.keys(AA_TABLE).forEach(function(aa) {
+        AA_TABLE[aa].forEach(function(c) { CODON_TO_AA[c] = aa; });
+    });
+
+    // Academic Biological Amino Acid Clustering Order for Heatmap Matrix Layouts
+    var BIOLOGICAL_CODON_ORDER = [
+        "GCT", "GCC", "GCA", "GCG", "TGT", "TGC", "GAT", "GAC", "GAA", "GAG", 
+        "TTT", "TTC", "GGT", "GGC", "GGA", "GGG", "CAT", "CAC", "ATT", "ATC", 
+        "ATA", "AAA", "AAG", "TTA", "TTG", "CTT", "CTC", "CTA", "CTG", "ATG", 
+        "AAT", "AAC", "CCT", "CCC", "CCA", "CCG", "CAA", "CAG", "CGT", "CGC", 
+        "CGA", "CGG", "AGA", "AGG", "TCT", "TCC", "TCA", "TCG", "AGT", "AGC", 
+        "ACT", "ACC", "ACA", "ACG", "GTT", "GTC", "GTA", "GTG", "TGG", "TAT", 
+        "TAC", "TAA", "TAG", "TGA"
+    ];
+
+    // Global Registry Buffers
+    var codonWeightsDatabase = { user_custom: null };
+    var riboSeqDatabase = {};
+    var currentSelectedRiboSiteIdx = 30; 
+    var currentComparisonMode = "absolute";
+    var LAST_OPTIMIZED_SEQUENCE = "";
+    var dynamicFastaPayload = "";
+
+    // Pipeline Global Storage Arrays to satisfy download hooks safely
+    var rawCodonFileData = null; 
+    var rawTpmFileData = null;
+    var computedCoeffsBlobText = "";
+    var computedPredsBlobText = "";
+    var autoBaseName = "expression_matrix";
+
+    var RIBO_SITES = [];
+    for (var s = -50; s <= 50; s++) { RIBO_SITES.push(s === 0 ? "0 (P-site)" : (s > 0 ? "+" + s : "" + s)); }
+
+    var VALID_RIBO_SPECIES = [
+        "Arabidopsis_thaliana", "Oryza_sativa", "Homo_sapiens", 
+        "Mus_musculus", "Drosophila_melanogaster", "Saccharomyces_cerevisiae", "Escherichia_coli"
+    ];
+
+    // =========================================================================
+    // --- 2. REGRESSION MATHEMATICAL UTILITIES ---
+    // =========================================================================
+    function clrFromCountsFast(counts) {
+        var total = 0;
+        for (var i = 0; i < 64; i++) total += counts[i];
+        if (total === 0) total = 0.000001;
+
+        var logp = new Float64Array(64);
+        var logSum = 0;
+        for (var i = 0; i < 64; i++) {
+            var p = counts[i] / total;
+            if (p < 0.000001) p = 0.000001;
+            logp[i] = Math.log(p);
+            logSum += logp[i];
+        }
+        var gm = logSum / 64;
+
+        var clr = new Float64Array(64);
+        for (var i = 0; i < 64; i++) { clr[i] = logp[i] - gm; }
+        return clr;
+    }
+
+    function predictFromClrFast(clrVec, model) {
+        var y = model.intercept;
+        for (var i = 0; i < 64; i++) { y += model.coef[i] * clrVec[i]; }
+        var scaleMode = model.log_transform || "log1p";
+        if (scaleMode === "log1p") return Math.expm1(y);
+        if (scaleMode === "log10") return Math.pow(10, y);
+        return y;
+    }
+
+    function computeCounts(seq) {
+        var cleanSeq = seq.toUpperCase().replace(/U/g, "T");
+        var usable = Math.floor(cleanSeq.length / 3) * 3;
+        var counts = new Float64Array(64).fill(0);
+        for (var i = 0; i < usable; i += 3) {
+            var codon = cleanSeq.substring(i, i + 3);
+            if (CODON_INDEX[codon] !== undefined) { counts[CODON_INDEX[codon]] += 1; }
+        }
+        return counts;
+    }
+
+    function getModelFilePath(modelKey) {
+        var isPa = modelKey.indexOf("_pa") !== -1;
+        var speciesName = isPa ? modelKey.replace("_pa", "") : modelKey.replace("_tpm", "");
+        var suffix = isPa ? "pa-based" : "tpm-based";
+        return "models/" + speciesName + ".coeff." + suffix + ".tsv";
+    }
+
+    function fetchAndRegisterModel(modelKey) {
+        if (modelKey === "user_custom") {
+            if (codonWeightsDatabase.user_custom) return Promise.resolve(codonWeightsDatabase.user_custom);
+            return Promise.reject(new Error("No custom model uploaded yet."));
+        }
+        if (codonWeightsDatabase[modelKey]) return Promise.resolve(codonWeightsDatabase[modelKey]);
+        
+        return fetch(getModelFilePath(modelKey))
+            .then(function(res) { if (!res.ok) throw new Error("Missing model"); return res.text(); })
+            .then(function(tsvText) {
+                var lines = tsvText.split(/\r?\n/);
+                var intercept = 0, coefMap = {};
+                for (var i = 1; i < lines.length; i++) {
+                    var line = lines[i].trim(); if (!line) continue;
+                    var cols = line.split('\t'); if (cols.length < 2) continue;
+                    var variableName = cols[0].trim();
+                    var value = parseFloat(cols[1]);
+                    if (variableName === "(Intercept)") { intercept = value; } 
+                    else {
+                        var codon = variableName.toUpperCase().replace('U', 'T');
+                        if (CODON_INDEX[codon] !== undefined) coefMap[codon] = value;
+                    }
+                }
+                var coefArray = new Float64Array(64);
+                CODONS.forEach(function(codon, idx) { coefArray[idx] = coefMap[codon] !== undefined ? coefMap[codon] : 0.0; });
+                codonWeightsDatabase[modelKey] = { intercept: intercept, coef: coefArray, log_transform: "log1p" };
+                return codonWeightsDatabase[modelKey];
+            });
+    }
+
+    // =========================================================================
+    // --- 3. CODON OPTIMIZATION SEED CLIENT WINDOWS ---
+    // =========================================================================
+    var dynamicFastaPayload = "";
+    var LAST_OPTIMIZED_SEQUENCE = ""; 
+
+    function optimizeCodons() {
+        var rawInput = document.getElementById("sequenceInput").value.trim();
+        var downloadBtn = document.getElementById("downloadBtn");
+        var copyBtn = document.getElementById("copyBtn");
+        var outputElement = document.getElementById("optimizationOutput");
+        
+        if (rawInput.length === 0) { alert("Please enter a valid sequence."); return; }
+        var selectedKey = document.getElementById("speciesSelect").value;
+        outputElement.innerText = "Loading TSV weights and running sequence engineering loops...";
+
+        fetchAndRegisterModel(selectedKey).then(function(model) {
+            var records = [];
+            if (rawInput.charAt(0) === '>') {
+                var lines = rawInput.split(/\r?\n/);
+                var currentHeader = "", currentSeq = [];
+                for (var l = 0; l < lines.length; l++) {
+                    var line = lines[l].trim(); if (!line) continue;
+                    if (line.charAt(0) === '>') {
+                        if (currentSeq.length > 0) records.push({ header: currentHeader, seq: currentSeq.join("") });
+                        currentHeader = line; currentSeq = [];
+                    } else { currentSeq.push(line); }
+                }
+                if (currentSeq.length > 0) records.push({ header: currentHeader, seq: currentSeq.join("") });
+            } else { records.push({ header: ">Input_Sequence", seq: rawInput }); }
+
+            var outLog = "--- REGRESSION CODON OPTIMIZER ---\n\n";
+            var cleanFastaAccumulator = ""; 
+
+            for (var r = 0; r < records.length; r++) {
+                var record = records[r];
+                var initialCds = record.seq.toUpperCase().replace(/[^A-Z]/g, '').replace(/U/g, 'T');
+                if (initialCds.length === 0) continue;
+                var usable = Math.floor(initialCds.length / 3) * 3;
+                var cds = initialCds.substring(0, usable);
+                var aaSeq = [], cdsArray = [];
+                
+                for (var i = 0; i < usable; i += 3) {
+                    var codon = cds.substring(i, i + 3);
+                    cdsArray.push(codon); aaSeq.push(CODON_TO_AA[codon] || "X");
+                }
+
+                var counts = computeCounts(cds);
+                var clrVec = clrFromCountsFast(counts);
+                var beforeMin = predictFromClrFast(clrVec, model);
+                var currentMin = beforeMin;
+
+                for (var it = 0; it < 100; it++) {
+                    var improved = false;
+                    for (var pos = 0; pos < aaSeq.length; pos++) {
+                        var aa = aaSeq[pos];
+                        if (!AA_TABLE[aa] || AA_TABLE[aa].length <= 1) continue;
+                        var oldCodon = cdsArray[pos], oldIdx = CODON_INDEX[oldCodon];
+                        if (oldIdx === undefined) continue;
+                        var bestCodon = oldCodon, bestMin = currentMin;
+
+                        for (var k = 0; k < AA_TABLE[aa].length; k++) {
+                            var newCodon = AA_TABLE[aa][k]; if (newCodon === oldCodon) continue;
+                            var newIdx = CODON_INDEX[newCodon]; if (newIdx === undefined) continue;
+
+                            counts[oldIdx] -= 1; counts[newIdx] += 1;
+                            var newClr = clrFromCountsFast(counts);
+                            var newMin = predictFromClrFast(newClr, model);
+                            if (newMin > bestMin) { bestMin = newMin; bestCodon = newCodon; }
+                            counts[oldIdx] += 1; counts[newIdx] -= 1;
+                        }
+                        if (bestCodon !== oldCodon) {
+                            counts[oldIdx] -= 1; counts[CODON_INDEX[bestCodon]] += 1;
+                            cdsArray[pos] = bestCodon; currentMin = bestMin; improved = true;
+                        }
+                    }
+                    if (!improved) break;
+                }
+
+                var optimizedResultSeq = cdsArray.join("");
+                outLog += record.header + " (Optimized Metrics)\n" +
+                         " - Predicted Level BEFORE : " + beforeMin.toFixed(6) + "\n" +
+                         " - Predicted Level AFTER  : " + currentMin.toFixed(6) + "\n" + optimizedResultSeq + "\n\n";
+
+                var cleanHeader = record.header.replace(/\r/g, "").substring(1).split(" ")[0];
+                cleanFastaAccumulator += ">" + cleanHeader + "_optimized_" + selectedKey + "\n" + optimizedResultSeq + "\n";
+                LAST_OPTIMIZED_SEQUENCE = optimizedResultSeq;
+            }
+
+            outputElement.innerText = outLog;
+            dynamicFastaPayload = cleanFastaAccumulator;
+
+            if (copyBtn) { copyBtn.removeAttribute('disabled'); copyBtn.style.background = "#31708f"; }
+            if (downloadBtn) { downloadBtn.removeAttribute('disabled'); downloadBtn.style.background = "#228222"; }
+
+            if (LAST_OPTIMIZED_SEQUENCE) {
+                var slider = document.getElementById('siteSlider');
+                if (slider) { slider.max = Math.max(0, (LAST_OPTIMIZED_SEQUENCE.length / 3) - 1); slider.value = 0; }
+                updateBrowser(0);
+            }
+        }).catch(function(err) { outputElement.innerText = "Execution failed: " + err.message; });
+    }
+
+    function copyToClipboard() {
+        // セクション1またはセクション2のコンソール要素を検索
+        var outputEl = document.getElementById("optimizationOutput") || document.getElementById("customWeightOutput");
+        if (!outputEl) return;
+        
+        // 【修正】配列の優先変数を無視し、画面（コンソール）に見えているテキストを最優先で取得
+        var textToCopy = outputEl.innerText || outputEl.textContent;
+        
+        navigator.clipboard.writeText(textToCopy).then(function() {
+            var btn = document.getElementById("copyBtn");
+            if (btn) { 
+                var old = btn.innerText; 
+                btn.innerText = "✅ Copied!"; 
+                setTimeout(function(){ btn.innerText = old; }, 1500); 
+            }
+        }).catch(function(err) {
+            console.error("Clipboard API error:", err);
+        });
+    }
+
+    function downloadFastaOutput() {
+        if (!dynamicFastaPayload) return;
+        var selectedSpecies = document.getElementById("speciesSelect").value;
+        var fileName = "optimized_" + selectedSpecies + "_" + Date.now() + ".fasta";
+        var blob = new Blob([dynamicFastaPayload], { type: "text/plain;charset=utf-8" });
+        var downloadLink = document.createElement("a");
+        downloadLink.href = URL.createObjectURL(blob); downloadLink.download = fileName;
+        document.body.appendChild(downloadLink); downloadLink.click(); document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(downloadLink.href);
+    }
+
+    function clearAllInputs() {
+        var seqInputEl = document.getElementById("sequenceInput"); if (seqInputEl) seqInputEl.value = "";
+        var fileInputEl = document.getElementById("fastaFileInput"); if (fileInputEl) fileInputEl.value = "";
+        var outputEl = document.getElementById("optimizationOutput"); if (outputEl) outputEl.innerText = "The optimized sequence will appear here...";
+        dynamicFastaPayload = ""; LAST_OPTIMIZED_SEQUENCE = "";
+        var dBtn = document.getElementById("downloadBtn"); if (dBtn) { dBtn.setAttribute('disabled', 'true'); dBtn.style.background = "#555"; }
+        var cBtn = document.getElementById("copyBtn"); if (cBtn) { cBtn.setAttribute('disabled', 'true'); cBtn.style.background = "#cccccc"; }
+        var slider = document.getElementById('siteSlider'); if (slider) { slider.max = 0; slider.value = 0; }
+        updateBrowser(0);
+    }
+
+    // =========================================================================
+    // --- 4. DYNAMIC INTEGRATED MONITOR INTERFACE (PREDICTION LOGO PANEL ONLY) ---
+    // =========================================================================
+    function updateBrowser(positionValue) {
+        var pos = parseInt(positionValue, 10);
+        var siteValEl = document.getElementById('siteValue'); if (siteValEl) siteValEl.innerText = pos;
+
+        var speciesSelectEl = document.getElementById("speciesSelect");
+        var species = speciesSelectEl ? speciesSelectEl.value : "Homo_sapiens_pa";
+        
+        var primaryLogoContainer = document.getElementById('logoContainer');
+        var metaDiv = document.getElementById('browserMeta');
+        if (!metaDiv) return;
+
+        fetchAndRegisterModel(species).then(function(model) {
+            var currentCodon = "ATG";
+            if (LAST_OPTIMIZED_SEQUENCE && (pos * 3 + 3) <= LAST_OPTIMIZED_SEQUENCE.length) {
+                currentCodon = LAST_OPTIMIZED_SEQUENCE.substring(pos * 3, pos * 3 + 3);
+            }
+
+            var codonIdx = CODON_INDEX[currentCodon];
+            var coefValue = (model && model.coef && codonIdx !== undefined) ? model.coef[codonIdx] : 0;
+            
+            if (primaryLogoContainer) {
+                primaryLogoContainer.innerHTML = "";
+                for (var b = 0; b < 3; b++) {
+                    var baseLetter = currentCodon[b];
+                    if (!baseLetter) continue;
+                    var letterSpan = document.createElement('span');
+                    letterSpan.className = "logo-letter letter-" + baseLetter;
+                    letterSpan.innerText = baseLetter;
+                    
+                    var wFactor = (model && model.coef && codonIdx !== undefined) ? Math.abs(model.coef[codonIdx]) * 15 : 1.0;
+                    var sY = Math.max(0.4, Math.min(3.5, wFactor));
+                    letterSpan.style.transform = "scaleY(" + sY + ")";
+                    primaryLogoContainer.appendChild(letterSpan);
+                }
+            }
+
+            metaDiv.innerHTML = 
+                "<div style='margin-bottom:4px;'><strong>Active Analysis Model:</strong> " + species + "</div>" +
+                "<div style='margin-bottom:4px;'><strong>Model Intercept (β₀):</strong> " + model.intercept.toFixed(4) + "</div>" +
+                "<div style='margin-bottom:4px;'><strong>Position " + pos + " Codon Selection:</strong> " + currentCodon + " (AA: " + (CODON_TO_AA[currentCodon] || "X") + ")</div>" +
+                "<div><strong>Target Codon Regression Weight:</strong> " + coefValue.toFixed(6) + "</div>";
+        }).catch(function(e) {
+            console.error("Pipeline monitoring update failed:", e);
+        });
+    }
+
+    // =========================================================================
+    // --- 5. INDEPENDENT RIBO-SEQ BROWSER SYSTEM (61-SITE REFACTORED ENGINE) ---
+    // =========================================================================
+    
+    // Global Domain Boundaries Configuration (-30 to +30 Sites Context)
+    var RIBO_TOTAL_SITES = 61;
+    
+    // Dynamic Species Registry: Automates P-Site offsets and window boundaries mapping
+    var CURRENT_RIBO_CONFIG = {
+        centerIdx: 30,  // Dynamic position index of P-site within the 61-element matrix array
+        minLabel: -30,  // Label name at index 0
+        maxLabel: 30    // Label name at index 60
+    };
+    
+    // --- Global Scientific Nomenclature Map Register ---
+    var SPECIES_SHORT_NAMES = {
+        "Homo_sapiens": "Human",
+        "Arabidopsis_thaliana": "Thale cress",
+        "Oryza_sativa": "Rice",
+        "Mus_musculus": "Mouse",
+        "Drosophila_melanogaster": "Fruit fly",
+        "Saccharomyces_cerevisiae": "Baker's yeast",
+        "Escherichia_coli": "E. coli"
+    };
+    
+    // Resolves structural biological metadata ranges based on the selected species profile
+    function updateActiveSpeciesConfig(speciesKey) {
+        if (speciesKey === "Saccharomyces_cerevisiae" || speciesKey === "Escherichia_coli") {
+            // Slices left 25 and right 15 fields out of the 101 raw asset set (-25 to +35 range)
+            CURRENT_RIBO_CONFIG.centerIdx = 24; 
+            CURRENT_RIBO_CONFIG.minLabel = -24;
+            CURRENT_RIBO_CONFIG.maxLabel = 34;
+        } else {
+            // Default species profile slices symmetrically (-30 to +30 range)
+            CURRENT_RIBO_CONFIG.centerIdx = 30;
+            CURRENT_RIBO_CONFIG.minLabel = -30;
+            CURRENT_RIBO_CONFIG.maxLabel = 30;
+        }
+    }
+
+    // Helper Utility: Secure translation of continuous array matrix index to dynamic relative genomic site name
+    function getRiboSiteLabel(idx) {
+        var dist = idx - CURRENT_RIBO_CONFIG.centerIdx;
+        if (dist === 0) return "0 (P-site)";
+        if (dist === 1) return "+1 (A-site)";
+        if (dist === -1) return "-1 (E-site)";
+        return dist > 0 ? "+" + dist : "" + dist;
+    }
+
+    // Mathematical Signal Processing: Calculates structural base preferences (GC, GC3, GT3, GA3) across 61 sites
+    function calculateNucleotideMetrics(matrix) {
+        var hideStopCodons = document.getElementById("hideStopCodonsCheck").checked;
+        var displayRowsCount = hideStopCodons ? 61 : 64;
+        
+        var metrics = {
+            gc: new Float64Array(RIBO_TOTAL_SITES),
+            gc3: new Float64Array(RIBO_TOTAL_SITES),
+            gt3: new Float64Array(RIBO_TOTAL_SITES),
+            ga3: new Float64Array(RIBO_TOTAL_SITES)
+        };
+
+        for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+            var sumWeight = 0;
+            var gcSum = 0, gc3Sum = 0, gt3Sum = 0, ga3Sum = 0;
+
+            for (var i = 0; i < displayRowsCount; i++) {
+                var codonName = BIOLOGICAL_CODON_ORDER[i];
+                var origCIdx = CODON_INDEX[codonName];
+                var weight = matrix[origCIdx][s];
+
+                sumWeight += weight;
+
+                var b1 = codonName.charAt(0);
+                var b2 = codonName.charAt(1);
+                var b3 = codonName.charAt(2);
+
+                var gcCount = 0;
+                if (b1 === 'G' || b1 === 'C') gcCount++;
+                if (b2 === 'G' || b2 === 'C') gcCount++;
+                if (b3 === 'G' || b3 === 'C') gcCount++;
+                gcSum += (gcCount / 3) * weight;
+
+                if (b3 === 'G' || b3 === 'C') gc3Sum += weight;
+                if (b3 === 'G' || b3 === 'T') gt3Sum += weight;
+                if (b3 === 'G' || b3 === 'A') ga3Sum += weight;
+            }
+
+            if (sumWeight > 0) {
+                metrics.gc[s] = gcSum / sumWeight;
+                metrics.gc3[s] = gc3Sum / sumWeight;
+                metrics.gt3[s] = gt3Sum / sumWeight;
+                metrics.ga3[s] = ga3Sum / sumWeight;
+            }
+        }
+        return metrics;
+    }
+
+    function getRiboDataFilePath(speciesKey) {
+        return "ribo-seq/" + speciesKey + "_ribo-seq-weighted_codon_frequencies.tsv";
+    }
+
+    function loadIndependentRiboData(val) {
+        updateRiboBrowser();
+    }
+
+    function fetchAndRegisterRiboData(speciesKey) {
+        if (riboSeqDatabase[speciesKey]) return Promise.resolve(riboSeqDatabase[speciesKey]);
+
+        var filePath = getRiboDataFilePath(speciesKey);
+        return fetch(filePath)
+            .then(function(res) {
+                if (!res.ok) { 
+                    console.warn("404: Ribo-seq file missing at: " + filePath + ". Template created."); 
+                    return fetchMockRiboData(speciesKey); 
+                }
+                return res.text();
+            })
+            .then(function(txt) {
+                if (typeof txt !== "string" || txt.indexOf("Codon") === -1) return fetchMockRiboData(speciesKey);
+                return parseRiboTsv(speciesKey, txt);
+            })
+            .catch(function() { return fetchMockRiboData(speciesKey); });
+    }
+
+    function parseRiboTsv(key, tsvText) {
+        var lines = tsvText.split(/\r?\n/);
+        var matrix = Array.from({ length: 64 }, function() { return new Float64Array(RIBO_TOTAL_SITES); });
+        var parsedCount = 0;
+        
+        // Temporarily determine local slicing offsets to parse raw files safely before committing database changes
+        var isAsymmetric = (key === "Saccharomyces_cerevisiae" || key === "Escherichia_coli");
+        var localLeftTrim = isAsymmetric ? 24 : 20;
+
+        for (var i = 1; i < lines.length; i++) {
+            var line = lines[i].trim(); if (!line) continue;
+            var cols = line.split('\t'); if (cols.length < 2) continue;
+            
+            var codon = cols[0].trim().toUpperCase().replace('U', 'T');
+            var cIdx = CODON_INDEX[codon];
+            if (cIdx === undefined) continue;
+
+            var originalDataPointsCount = cols.length - 1;
+
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                var sourceColumnIndex = 0;
+                if (originalDataPointsCount >= 101) {
+                    // Extract custom species slicing window dynamically out of uniform 101 assets sets
+                    sourceColumnIndex = s + localLeftTrim + 1;
+                } else {
+                    sourceColumnIndex = s + 1;
+                }
+
+                var val = parseFloat(cols[sourceColumnIndex]);
+                matrix[cIdx][s] = isNaN(val) ? 0.0 : val;
+            }
+            parsedCount++;
+        }
+
+        if (parsedCount < 10) return fetchMockRiboData(key);
+        riboSeqDatabase[key] = matrix;
+        return matrix;
+    }
+
+    function fetchMockRiboData(key) {
+        var matrix = Array.from({ length: 64 }, function() { return new Float64Array(RIBO_TOTAL_SITES); });
+        var isAsymmetric = (key === "Saccharomyces_cerevisiae" || key === "Escherichia_coli");
+        var localCenter = isAsymmetric ? 25 : 30;
+
+        for (var c = 0; c < 64; c++) {
+            var seed = (c % 7) * 0.12;
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                var distFromP = s - localCenter;
+                matrix[c][s] = 0.015 + seed * Math.exp(-(distFromP * distFromP) / 140) + Math.random() * 0.003;
+            }
+        }
+        riboSeqDatabase[key] = matrix;
+        return Promise.resolve(matrix);
+    }
+
+    function toggleComparisonView(mode) {
+        currentComparisonMode = mode;
+        
+        var absBtn = document.getElementById("viewAbsoluteBtn");
+        var conBtn = document.getElementById("viewContrastBtn");
+        
+        if (absBtn) absBtn.className = (mode === "absolute") ? "active" : "";
+        if (conBtn) conBtn.className = (mode === "contrast") ? "active" : "";
+        
+        // Directly execute the core update engine without touching element states
+        updateRiboBrowser();
+    }
+
+    // ★引数に baselineMetrics と mode を追加
+    function drawRiboMetricsLineChart(metrics, baselineMetrics, mode) {
+        var canvas = document.getElementById("riboMetricsLineChart");
+        if (!canvas) return;
+        var ctx = canvas.getContext("2d");
+        var varW = canvas.width, varH = canvas.height;
+        ctx.clearRect(0, 0, varW, varH);
+
+        var padL = 45, padR = 15;
+        var mW = varW - padL - padR;
+
+        // ★モード判定（contrast モードかつベースラインが存在するか）
+        var isContrast = (mode === "contrast" && baselineMetrics);
+
+        // 描画用のデータ配列を動的に作成
+        var tracks = [
+            { rawData: metrics.gc,  baseData: isContrast ? baselineMetrics.gc  : null, color: "#228b22", label: "GC" },
+            { rawData: metrics.gc3, baseData: isContrast ? baselineMetrics.gc3 : null, color: "#0066cc", label: "GC3" },
+            { rawData: metrics.gt3, baseData: isContrast ? baselineMetrics.gt3 : null, color: "#d9534f", label: "GT3" },
+            { rawData: metrics.ga3, baseData: isContrast ? baselineMetrics.ga3 : null, color: "#f0ad4e", label: "GA3" }
+        ];
+
+        // 各トラックの最終的な描画用プロファイル（実データ or 差分）を計算
+        var plotTracks = tracks.map(function(t) {
+            var displayData = new Float64Array(RIBO_TOTAL_SITES);
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                if (isContrast) {
+                    // 差分（Δ）を計算
+                    displayData[s] = t.rawData[s] - t.baseData[s];
+                } else {
+                    // 通常の絶対値
+                    displayData[s] = t.rawData[s];
+                }
+            }
+            return { data: displayData, color: t.color, label: t.label };
+        });
+
+        // 最小値・最大値の自動スケール計算
+        var maxV = -Infinity, minV = Infinity;
+        plotTracks.forEach(function(track) {
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                if (track.data[s] > maxV) maxV = track.data[s];
+                if (track.data[s] < minV) minV = track.data[s];
+            }
+        });
+
+        var dataRange = maxV - minV;
+        if (dataRange < 0.05) dataRange = 0.05;
+
+        if (isContrast) {
+            // 🌟 差分モード用のスケール調整
+            // 差分は正負に振れるため、0 を中心に綺麗に収まるようにマージンを持たせます
+            maxV = maxV + (dataRange * 0.1);
+            minV = minV - (dataRange * 0.1);
+        } else {
+            // 通常モード（絶対値用：0〜1の範囲にクリップ）
+            maxV = Math.min(1.0, maxV + (dataRange * 0.1));
+            minV = Math.max(0.0, minV - (dataRange * 0.1));
+        }
+        var finalScaleRange = maxV - minV;
+
+        // 背景の目盛り線（グリッド）とY軸ラベルの描画
+        ctx.strokeStyle = "#f3f3f3";
+        ctx.lineWidth = 1;
+        for (var step = 0; step <= 4; step++) {
+            var ratio = step / 4;
+            var valY = minV + (ratio * finalScaleRange);
+            var yPos = varH - (ratio * (varH - 16)) - 8;
+            
+            ctx.beginPath(); 
+            ctx.moveTo(padL, yPos); 
+            ctx.lineTo(padL + mW, yPos); 
+            ctx.stroke();
+            
+            ctx.fillStyle = "#999";
+            ctx.font = "8px sans-serif";
+            ctx.textAlign = "right";
+
+            // 🌟 差分モードの時は「+2%」や「-1%」のように符号を明示、通常はそのまま表示
+            var formattedVal = (valY * 100).toFixed(0);
+            if (isContrast && valY > 0) {
+                formattedVal = "+" + formattedVal;
+            }
+            ctx.fillText(formattedVal + "%", padL - 5, yPos + 3);
+        }
+
+        // 🌟 差分モード限定: Δ = 0 の基準線（センターライン）を少し強調して描画
+        if (isContrast && minV < 0 && maxV > 0) {
+            var zeroRatio = (0 - minV) / finalScaleRange;
+            var zeroYPos = varH - (zeroRatio * (varH - 16)) - 8;
+            ctx.strokeStyle = "#999"; // 目盛りよりやや濃いグレー
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);  // 点線にする（お好みで実線でも可）
+            ctx.beginPath();
+            ctx.moveTo(padL, zeroYPos);
+            ctx.lineTo(padL + mW, zeroYPos);
+            ctx.stroke();
+            ctx.setLineDash([]);      // 点線をリセット
+        }
+
+        // 折れ線の描画
+        plotTracks.forEach(function(track) {
+            ctx.strokeStyle = track.color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                var x = padL + (s / (RIBO_TOTAL_SITES - 1)) * mW;
+                var normY = (track.data[s] - minV) / finalScaleRange;
+                var y = varH - (normY * (varH - 16)) - 8;
+                if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        });
+
+        // 現在選択されているサイトの縦線を描画
+        var currentX = padL + 
+            (currentSelectedRiboSiteIdx / (RIBO_TOTAL_SITES - 1)) * mW;
+        ctx.strokeStyle = "rgba(0, 102, 204, 0.4)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(currentX, 0); ctx.lineTo(currentX, varH); ctx.stroke();
+
+        // 凡例の描画
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillRect(padL + 10, 4, 180, 15);
+        ctx.font = "9px sans-serif";
+        var xOffset = padL + 15;
+        plotTracks.forEach(function(track) {
+            ctx.fillStyle = track.color;
+            ctx.fillRect(xOffset, 5, 7, 7);
+            ctx.fillStyle = "#444";
+            ctx.textAlign = "left";
+            // 🌟 差分モードの時は凡例名に Δ を付与（例: ΔGC）
+            var labelText = isContrast ? "Δ" + track.label : track.label;
+            ctx.fillText(labelText, xOffset + 10, 12);
+            xOffset += 42;
+        });
+    }
+
+    var lastActiveSelectedSpecies = "Homo_sapiens";
+
+    function drawRiboHeatmap(matrix) {
+        var canvas = document.getElementById("riboHeatmap"); 
+        if (!canvas) return;
+        var ctx = canvas.getContext("2d");
+        var varW = canvas.width, varH = canvas.height;
+        ctx.clearRect(0, 0, varW, varH);
+
+        var padL = 45, padR = 15, padT = 20, padB = 35;
+        var mW = varW - padL - padR, mH = varH - padT - padB;
+        var cellW = mW / RIBO_TOTAL_SITES;
+
+        // --- 【超重要】2つのセレクトボックスの値をリアルタイムに直接取得 ---
+        var targetSelect = document.getElementById("riboSpeciesSelect");
+        var baseSelect = document.getElementById("riboBaselineSelect");
+        
+        var targetKey = targetSelect ? targetSelect.value : "Homo_sapiens";
+        var baseKey = baseSelect ? baseSelect.value : "Homo_sapiens";
+
+        // 2つ目のプルダウンで選ばれた生物種のデータをベースライン（引き算の基準）として動的に取得
+        var referenceBaselineMatrix = riboSeqDatabase[baseKey];
+        
+        // デルタビューが有効、かつ2つの生物種が異なる、かつベースラインデータが存在する場合にコントラスト（差分）を有効化
+        var isContrast = (currentComparisonMode === "contrast" && targetKey !== baseKey && referenceBaselineMatrix);
+        
+        var hideStopCodons = document.getElementById("hideStopCodonsCheck").checked;
+        var isAggregated = document.getElementById("aggregateSynonymousCheck").checked;
+
+        var displayRowsCount = isAggregated ? (hideStopCodons ? 20 : 21) : (hideStopCodons ? 61 : 64);
+        var cellH = mH / displayRowsCount;
+
+        var displayMatrix = Array.from(
+            { length: displayRowsCount }, 
+            function() { return new Float64Array(RIBO_TOTAL_SITES); }
+        );
+        var maxV = -Infinity, minV = Infinity;
+
+        // --- データ集約・差分算出ロジックの修正 ---
+        for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+            if (isAggregated) {
+                // 【アミノ酸集約モード】
+                var aaValuesActive = {};
+                var aaValuesBaseline = {};
+                BIOLOGICAL_AA_ORDER.forEach(function(aa) {
+                    aaValuesActive[aa] = 0.0;
+                    aaValuesBaseline[aa] = 0.0;
+                });
+
+                for (var c = 0; c < (hideStopCodons ? 61 : 64); c++) {
+                    var codon = BIOLOGICAL_CODON_ORDER[c];
+                    var origCIdx = CODON_INDEX[codon];
+                    var aa = CODON_TO_AA[codon] || "?";
+                    
+                    aaValuesActive[aa] += matrix[origCIdx][s];
+                    // 古い固定変数ではなく、新しく選ばれたベースラインマトリックスから正しく抽出
+                    if (isContrast && referenceBaselineMatrix) {
+                        aaValuesBaseline[aa] += referenceBaselineMatrix[origCIdx][s];
+                    }
+                }
+
+                for (var r = 0; r < displayRowsCount; r++) {
+                    var targetAA = BIOLOGICAL_AA_ORDER[r];
+                    var activeVal = aaValuesActive[targetAA];
+                    var refVal = isContrast ? aaValuesBaseline[targetAA] : 0.0;
+
+                    displayMatrix[r][s] = isContrast ? (activeVal - refVal) : activeVal;
+                    if (displayMatrix[r][s] > maxV) maxV = displayMatrix[r][s];
+                    if (displayMatrix[r][s] < minV) minV = displayMatrix[r][s];
+                }
+            } else {
+                // 【通常コドンモード】
+                for (var i = 0; i < displayRowsCount; i++) {
+                    var codonName = BIOLOGICAL_CODON_ORDER[i];
+                    var origCIdx = CODON_INDEX[codonName];
+                    var rawVal = matrix[origCIdx][s];
+                    // 新しく選ばれたベースラインマトリックスから正しく抽出して引き算
+                    var refVal = isContrast ? referenceBaselineMatrix[origCIdx][s] : 0.0;
+
+                    displayMatrix[i][s] = isContrast ? (rawVal - refVal) : rawVal;
+                    if (displayMatrix[i][s] > maxV) maxV = displayMatrix[i][s];
+                    if (displayMatrix[i][s] < minV) minV = displayMatrix[i][s];
+                }
+            }
+        }
+        var range = maxV - minV || 1.0;
+
+        // --- カラーバー・レジェンド文字列の動的更新 ---
+        var barEl = document.getElementById("gradientVisualScale");
+        var minTextEl = document.getElementById("scaleMinLabel");
+        var maxTextEl = document.getElementById("scaleMaxLabel");
+        
+        if (barEl && minTextEl && maxTextEl) {
+            if (isContrast) {
+                barEl.style.background = "linear-gradient(to right, rgb(6,82,221), rgb(255,255,255), rgb(255,110,0))";
+                minTextEl.innerText = "Negative Delta (Value: " + minV.toFixed(3) + ")";
+                maxTextEl.innerText = "Positive Delta (Value: +" + maxV.toFixed(3) + ")";
+            } else {
+                barEl.style.background = "linear-gradient(to right, rgb(255,255,255), rgb(255,140,0), rgb(190,50,0))";
+                minTextEl.innerText = isAggregated ? "Min AA Occupancy (" + minV.toFixed(3) + ")" : "Min frequency (" + minV.toFixed(4) + ")";
+                maxTextEl.innerText = isAggregated ? "Max AA Occupancy (" + maxV.toFixed(3) + ")" : "Max frequency (" + maxV.toFixed(4) + ")";
+            }
+        }
+
+        // --- マトリックスセルの描画 ---
+        for (var i = 0; i < displayRowsCount; i++) {
+            for (var s = 0; s < RIBO_TOTAL_SITES; s++) {
+                var norm = (displayMatrix[i][s] - minV) / range;
+                var fillColor;
+                
+                if (isContrast) {
+                    var r, g, b;
+                    if (norm < 0.5) {
+                        var t = norm * 2;
+                        r = Math.floor(6 + t * (255 - 6)); g = Math.floor(82 + t * (255 - 82)); b = Math.floor(221 + t * (255 - 221));
+                    } else {
+                        var t = (norm - 0.5) * 2;
+                        r = 255; g = Math.floor(255 + t * (110 - 255)); b = Math.floor(255 + t * (0 - 255));
+                    }
+                    fillColor = "rgb(" + r + "," + g + "," + b + ")";
+                } else {
+                    var r, g, b;
+                    if (norm < 0.5) {
+                        var t = norm * 2;
+                        r = 255; g = Math.floor(255 + t * (140 - 255)); b = Math.floor(255 + t * (0 - 255));
+                    } else {
+                        var t = (norm - 0.5) * 2;
+                        r = Math.floor(255 + t * (190 - 255)); g = Math.floor(140 + t * (50 - 140)); b = 0;
+                    }
+                    fillColor = "rgb(" + r + "," + g + "," + b + ")";
+                }
+                ctx.fillStyle = fillColor;
+                ctx.fillRect(padL + s * cellW, padT + i * cellH, cellW + 0.4, cellH + 0.4);
+            }
+        }
+
+        // 垂直シーク位置インジケーターのオーバーレイ
+        if (typeof currentSelectedRiboSiteIdx !== "undefined" && currentSelectedRiboSiteIdx >= 0 && currentSelectedRiboSiteIdx < RIBO_TOTAL_SITES) {
+            var indicatorX = padL + currentSelectedRiboSiteIdx * cellW;
+            ctx.strokeStyle = "rgba(0, 102, 204, 0.85)";
+            ctx.lineWidth = 1.75;
+            ctx.strokeRect(indicatorX, padT, cellW, mH);
+        }
+
+        // Y軸ラベルの描画
+        ctx.fillStyle = "#333"; 
+        ctx.font = isAggregated ? "bold 9px sans-serif" : "9px monospace"; 
+        ctx.textAlign = "right";
+
+        for (var i = 0; i < displayRowsCount; i++) {
+            var labelText = isAggregated ? (AA_TO_3LETTER[BIOLOGICAL_AA_ORDER[i]] + " (" + BIOLOGICAL_AA_ORDER[i] + ")") : BIOLOGICAL_CODON_ORDER[i];
+            var yLabelPos = padT + i * cellH + (cellH / 2) + 3;
+            if (isAggregated || (i % 2 === 0)) {
+                ctx.fillText(labelText, padL - 5, yLabelPos);
+            }
+        }
+        
+        if (!hideStopCodons && !isAggregated) {
+            ctx.strokeStyle = "rgba(169, 68, 66, 0.4)"; 
+            ctx.lineWidth = 1;
+            ctx.beginPath(); 
+            ctx.moveTo(padL, padT + 61 * cellH); 
+            ctx.lineTo(padL + mW, padT + 61 * cellH); 
+            ctx.stroke();
+        }
+
+        // X軸ラベルの描画
+        //ctx.textAlign = "center";
+        //ctx.font = "9px sans-serif";
+        //ctx.fillText(String(CURRENT_RIBO_CONFIG.minLabel), padL, padT + mH + 12);
+        //ctx.fillText("0", padL + CURRENT_RIBO_CONFIG.centerIdx * cellW, padT + mH + 12);
+        //ctx.fillText((CURRENT_RIBO_CONFIG.maxLabel >= 0 ? "+" : "") + CURRENT_RIBO_CONFIG.maxLabel, padL + mW, padT + mH + 12);
+                // X軸ラベルの描画（左端：-30, 中央：0, 右端：+30に固定）
+        // X軸ラベルの描画（左右・中央すべての位置を完全固定）
+        ctx.textAlign = "center";
+        ctx.font = "9px sans-serif";
+        ctx.fillText("-30", padL, padT + mH + 12);
+        ctx.fillText("0", padL + mW / 2, padT + mH + 12);
+        ctx.fillText("+30", padL + mW, padT + mH + 12);
+
+        // --- 📊 動的な生物種名を用いたメインタイトルの描画（正確な学術表現） ---
+        var SPECIES_SHORT_NAMES = {
+            "Homo_sapiens": "Human", "Arabidopsis_thaliana": "Thale cress", "Oryza_sativa": "Rice",
+            "Mus_musculus": "Mouse", "Drosophila_melanogaster": "Fruit fly", 
+            "Saccharomyces_cerevisiae": "Baker's yeast", "Escherichia_coli": "E. coli"
+        };
+        var targetName = SPECIES_SHORT_NAMES[targetKey] || "Selected species";
+        var baseName = SPECIES_SHORT_NAMES[baseKey] || "Baseline reference";
+
+        ctx.font = "bold 11px sans-serif";
+        var labelTitle = "";
+
+        if (isContrast) {
+            labelTitle = isAggregated ? 
+                targetName + " vs. " + baseName + " amino acid profile contrast (relative Δ variance)" : 
+                targetName + " vs. " + baseName + " Ribo-seq-weighted codon frequency contrast profile (61 sites)";
+        } else {
+            labelTitle = isAggregated ? 
+                targetName + " amino acid aggregated ribosome profiling density profile" : 
+                targetName + " Ribo-seq-weighted cumulative codon frequency profile (61 sites)";
+        }
+        
+        ctx.fillText(labelTitle, padL + mW / 2, padT + mH + 26);
+       // --- クリックイベントリスナー ---
+        if (!canvas.dataset.hooked) {
+            canvas.addEventListener("click", function(e) {
+                var rect = canvas.getBoundingClientRect();
+                var realX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                if (realX >= padL && realX <= (padL + mW)) {
+                    var clickedSite = Math.floor(((realX - padL) / mW) * RIBO_TOTAL_SITES);
+                    clickedSite = Math.max(0, Math.min(RIBO_TOTAL_SITES - 1, clickedSite));
+                    
+                    currentSelectedRiboSiteIdx = clickedSite;
+                    if (typeof GLOBAL_CURRENT_SLIDER_IDX !== "undefined") {
+                        GLOBAL_CURRENT_SLIDER_IDX = clickedSite;
+                    }
+
+                    var slider = document.getElementById("riboSlider"); 
+                    if (slider) slider.value = clickedSite;
+                    
+                    // Cascade synchronized updates straight across dependent visual modules
+                    selectRiboPosition(clickedSite);
+                }
+            });
+            canvas.dataset.hooked = "true";
+        }
+    }
+    
+    function renderRiboWebLogo(matrix, siteIdx) {
+        var container = document.getElementById("riboLogoContainer"); 
+        if (!container) return;
+        container.innerHTML = ""; 
+
+        var hideStopCodons = document.getElementById("hideStopCodonsCheck").checked;
+        var displayRowsCount = hideStopCodons ? 61 : 64;
+
+        var logoRowDiv = document.createElement("div");
+        logoRowDiv.style.display = "flex";
+        logoRowDiv.style.justifyContent = "space-around";
+        logoRowDiv.style.height = "120px"; 
+        logoRowDiv.style.alignItems = "flex-end";
+        logoRowDiv.style.width = "100%";
+        logoRowDiv.style.boxSizing = "border-box";
+
+        var baseKeys = ["A", "T", "G", "C"];
+        var colors = { 
+            'A': '#107c10', 'T': '#ffaa00', 
+            'G': '#ff3b30', 'C': '#007aff' 
+        };
+
+        for (var pos = 0; pos < 3; pos++) {
+            var baseFreqs = { "A": 0, "T": 0, "G": 0, "C": 0 };
+            var totalW = 0;
+            
+            for (var i = 0; i < displayRowsCount; i++) {
+                var codon = BIOLOGICAL_CODON_ORDER[i];
+                var origIdx = CODON_INDEX[codon];
+                var w = matrix[origIdx][siteIdx];
+                var charAtPos = codon.charAt(pos);
+                
+                if (baseFreqs[charAtPos] !== undefined) { 
+                    baseFreqs[charAtPos] += w; 
+                    totalW += w;
+                }
+            }
+
+            var freqStack = baseKeys.map(function(b) {
+                return { 
+                    base: b, 
+                    val: totalW > 0 ? (baseFreqs[b] / totalW) : 0 
+                };
+            }).sort(function(a, b) { return a.val - b.val; });
+
+            var slotDiv = document.createElement("div");
+            slotDiv.style.display = "flex";
+            slotDiv.style.flexDirection = "column";
+            slotDiv.style.alignItems = "center";
+            slotDiv.style.width = "24%"; 
+            slotDiv.style.height = "100%";
+            if (pos < 2) slotDiv.style.borderRight = "1px dashed #eee";
+
+            var canvas = document.createElement("canvas");
+            canvas.width = 120;
+            canvas.height = 120;
+            canvas.style.width = "100%";
+            canvas.style.height = "95px"; 
+            canvas.style.display = "block";
+            canvas.style.overflow = "visible";
+
+            var ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            var currentY = canvas.height - 2;
+            var availableH = canvas.height - 4;
+
+            freqStack.forEach(function(item) {
+                if (item.val <= 0.001) return;
+                
+                var fontH = item.val * availableH;
+                if (fontH < 4) return;
+
+                ctx.save();
+                ctx.translate(canvas.width / 2, currentY);
+                
+                var baseFontSize = 100;
+                ctx.scale(1.2, fontH / baseFontSize);
+                
+                ctx.font = "bold " + baseFontSize + "px monospace";
+                ctx.fillStyle = colors[item.base];
+                ctx.textAlign = "center";
+                ctx.textBaseline = "bottom";
+                
+                ctx.fillText(item.base, 0, 0);
+                ctx.restore();
+
+                currentY -= fontH;
+            });
+
+            slotDiv.appendChild(canvas);
+
+            var labelDiv = document.createElement("div");
+            labelDiv.style = "font-size:10px; color:#666; " + 
+                "margin-top:2px; font-weight:bold; text-align:center;";
+            labelDiv.innerText = "Pos " + (pos + 1);
+            slotDiv.appendChild(labelDiv);
+            
+            logoRowDiv.appendChild(slotDiv);
+        }
+
+        container.appendChild(logoRowDiv);
+    }
+
+    function updateMetricsConsole(matrix, metrics, siteIdx) {
+        var consoleEl = document.getElementById("riboMetricsConsole");
+        if (!consoleEl) return;
+
+        var label = getRiboSiteLabel(siteIdx);
+        var hideStopCodons = document.getElementById("hideStopCodonsCheck").checked;
+        var isAggregated = document.getElementById("aggregateSynonymousCheck").checked;
+        var displayRowsCount = hideStopCodons ? 61 : 64;
+
+        // --- FIX: Safely pull real-time dropdown state selections instead of using legacy keys ---
+        var targetSelect = document.getElementById("riboSpeciesSelect");
+        var baseSelect = document.getElementById("riboBaselineSelect");
+        
+        var targetKey = targetSelect ? targetSelect.value : "Homo_sapiens";
+        var baseKey = baseSelect ? baseSelect.value : "Homo_sapiens";
+
+        var referenceBaselineMatrix = riboSeqDatabase[baseKey];
+        var isContrast = (currentComparisonMode === "contrast" && targetKey !== baseKey && referenceBaselineMatrix);
+
+        var logText = "<strong>[SITE ANALYTICS METRICS FOR SITE: " + label + "]</strong>\n";
+        logText += "========================================================================\n";
+        logText += "Calculated base content profiles:\n";
+        logText += "  • GC Content  : " + (metrics.gc[siteIdx] * 100).toFixed(2) + " %\n";
+        logText += "  • GC3 Content : " + (metrics.gc3[siteIdx] * 100).toFixed(2) + " %\n";
+        logText += "  • GT3 Content : " + (metrics.gt3[siteIdx] * 100).toFixed(2) + " %\n";
+        logText += "  • GA3 Content : " + (metrics.ga3[siteIdx] * 100).toFixed(2) + " %\n\n";
+        
+        // Dynamic Column Header Layout Assignment based on active view modes state parameters
+        var SPECIES_SHORT_NAMES = {
+            "Homo_sapiens": "Human", "Arabidopsis_thaliana": "Thale cress", "Oryza_sativa": "Rice",
+            "Mus_musculus": "Mouse", "Drosophila_melanogaster": "Fruit fly", 
+            "Saccharomyces_cerevisiae": "Baker's yeast", "Escherichia_coli": "E. coli"
+        };
+        var cleanActiveName = SPECIES_SHORT_NAMES[targetKey] || "Target";
+        var cleanBaselineName = SPECIES_SHORT_NAMES[baseKey] || "Baseline";
+
+        // Pre-calculate Amino Acid Group Totals for the Console Header Layout
+        var aaGroupSumsActive = {};
+        var aaGroupSumsBaseline = {};
+        var aaPrintedFlags = {}; 
+
+        if (isAggregated) {
+            for (var i = 0; i < displayRowsCount; i++) {
+                var codonName = BIOLOGICAL_CODON_ORDER[i];
+                var origCIdx = CODON_INDEX[codonName];
+                var aaFamily = CODON_TO_AA[codonName] || "?";
+                
+                if (!aaGroupSumsActive[aaFamily]) aaGroupSumsActive[aaFamily] = 0;
+                aaGroupSumsActive[aaFamily] += matrix[origCIdx][siteIdx];
+
+                if (isContrast && referenceBaselineMatrix) {
+                    if (!aaGroupSumsBaseline[aaFamily]) aaGroupSumsBaseline[aaFamily] = 0;
+                    aaGroupSumsBaseline[aaFamily] += referenceBaselineMatrix[origCIdx][siteIdx];
+                }
+            }
+        }
+
+        // Adjust console column width templates to fit the extra aggregated payload data fields
+        if (isContrast) {
+            logText += "Ribo-seq-weighted cumulative codon frequencies:\n";
+            if (isAggregated) {
+                logText += "Rank Codon (AA) : [" + cleanActiveName.substring(0,6) + " frequency] | [Delta]   | === AA FAMILY TOTAL OCCUPANCY ===\n";
+            } else {
+                logText += "Rank Codon (AA) : [" + cleanActiveName.substring(0,6) + " frequency] | [" + cleanBaselineName.substring(0,6) + " delta]\n";
+            }
+            logText += "------------------------------------------------------------------------\n";
+        } else {
+            logText += "Ribo-seq-weighted cumulative codon frequencies:\n";
+            if (isAggregated) {
+                logText += "Rank Codon (AA) : [" + cleanActiveName.substring(0,6) + " frequency] | === AA FAMILY TOTAL OCCUPANCY ===\n";
+            } else {
+                logText += "Rank Codon (AA) : [" + cleanActiveName.substring(0,6) + " frequency]\n";
+            }
+            logText += "------------------------------------------------------------------------\n";
+        }
+
+        // Loop through metrics using the precise biological map arrangement layout sequence
+        for (var i = 0; i < displayRowsCount; i++) {
+            var codon = BIOLOGICAL_CODON_ORDER[i];
+            var origIdx = CODON_INDEX[codon];
+            var activeVal = matrix[origIdx][siteIdx];
+            var aa = CODON_TO_AA[codon] || "?";
+            var indexString = String(i + 1).padStart(2, '0');
+
+            var coreRowText = "";
+            if (isContrast) {
+                var baseVal = referenceBaselineMatrix ? referenceBaselineMatrix[origIdx][siteIdx] : 0.0;
+                var deltaVal = activeVal - baseVal;
+                var signStr = deltaVal >= 0 ? "+" : "";
+                
+                coreRowText = "  [" + indexString + "]  " + codon + "  (" + aa + ")  :   " + 
+                    activeVal.toFixed(5) + "   | (" + signStr + deltaVal.toFixed(5) + ")";
+            } else {
+                coreRowText = "  [" + indexString + "]  " + codon + "  (" + aa + ")  :   " + activeVal.toFixed(5);
+            }
+
+            if (isAggregated) {
+                if (!aaPrintedFlags[aa]) {
+                    var aaTotalActive = aaGroupSumsActive[aa];
+                    var appendText = "";
+
+                    if (isContrast) {
+                        var aaTotalBase = aaGroupSumsBaseline[aa] || 0.0;
+                        var aaTotalDelta = aaTotalActive - aaTotalBase;
+                        var aaSignStr = aaTotalDelta >= 0 ? "+" : "";
+                        appendText = " <== " + (AA_TO_3LETTER[aa] || aa) + " Total: " + aaTotalActive.toFixed(4) + " (" + aaSignStr + aaTotalDelta.toFixed(4) + ")";
+                    } else {
+                        appendText = " <== " + (AA_TO_3LETTER[aa] || aa) + " Total: " + aaTotalActive.toFixed(4);
+                    }
+                    
+                    var standardWidth = isContrast ? 56 : 32;
+                    logText += coreRowText.padEnd(standardWidth, " ") + appendText + "\n";
+                    aaPrintedFlags[aa] = true; 
+                } else {
+                    logText += coreRowText + "\n";
+                }
+            } else {
+                logText += coreRowText + "\n";
+            }
+        }
+
+        consoleEl.innerHTML = "<pre style='margin:0; font-family:inherit; white-space:pre-wrap;'>" + logText + "</pre>";
+    }
+
+    function toggleStopCodonsView() {
+        updateRiboBrowser();
+    }
+
+    function selectRiboPosition(siteIdx) {
+        currentSelectedRiboSiteIdx = Math.max(
+            0, 
+            Math.min(RIBO_TOTAL_SITES - 1, parseInt(siteIdx, 10))
+        );
+        var selectBox = document.getElementById("riboSpeciesSelect");
+        var speciesKey = selectBox ? selectBox.value : "Homo_sapiens";
+        
+        var labelEl = document.getElementById("riboPosValue");
+        if (labelEl) {
+            labelEl.innerText = getRiboSiteLabel(currentSelectedRiboSiteIdx);
+        }
+        
+        if (riboSeqDatabase[speciesKey]) {
+            var activeMatrix = riboSeqDatabase[speciesKey];
+            var computedMetrics = calculateNucleotideMetrics(activeMatrix);
+            
+            // 🌟 【修正】キャッシュが存在する場合はそれらを使い、なければ通常通り単一メトリクスで描画
+            var finalBaseMetrics = window.LAST_BASELINE_METRICS || null;
+            drawRiboMetricsLineChart(computedMetrics, finalBaseMetrics, currentComparisonMode);
+            
+            drawRiboHeatmap(activeMatrix);
+            renderRiboWebLogo(activeMatrix, currentSelectedRiboSiteIdx);
+            updateMetricsConsole(
+                activeMatrix, 
+                computedMetrics, 
+                currentSelectedRiboSiteIdx
+            );
+        }
+    }
+
+    function toggleSynonymousAggregationView() {
+        var selectBox = document.getElementById("riboSpeciesSelect");
+        var speciesKey = selectBox ? selectBox.value : "Homo_sapiens";
+        var activeMatrix = riboSeqDatabase[speciesKey];
+        
+        if (activeMatrix) {
+            // ヒートマップをアミノ酸スケール/コドンスケールに再描画
+            drawRiboHeatmap(activeMatrix);
+            
+            // 選択中の位置(シークバー縦線やWebLogo、右側コンソール)も現在のモードで再同期
+            if (typeof currentSelectedRiboSiteIdx !== "undefined") {
+                selectRiboPosition(currentSelectedRiboSiteIdx);
+            }
+        }
+    }
+
+    function updateRiboBrowser() {
+        var targetSelect = document.getElementById("riboSpeciesSelect");
+        var baseSelect = document.getElementById("riboBaselineSelect");
+        
+        var targetSpeciesKey = targetSelect ? targetSelect.value : "Homo_sapiens";
+        var baselineSpeciesKey = baseSelect ? baseSelect.value : "Homo_sapiens";
+
+        updateActiveSpeciesConfig(targetSpeciesKey);
+
+        var contrastBtn = document.getElementById("viewContrastBtn");
+        if (contrastBtn) {
+            var cleanBaselineName = (SPECIES_SHORT_NAMES[baselineSpeciesKey] || "Baseline").replace('_', ' '); 
+            contrastBtn.innerText = cleanBaselineName + " contrast (Δ View)";
+        }
+
+        Promise.all([
+            fetchAndRegisterRiboData(baselineSpeciesKey),
+            fetchAndRegisterRiboData(targetSpeciesKey)
+        ]).then(function(matrices) {
+            var baselineMatrix = matrices[0];
+            var activeMatrix = matrices[1];
+
+            var computedMetrics = calculateNucleotideMetrics(activeMatrix);
+            var baselineMetrics = calculateNucleotideMetrics(baselineMatrix);
+            
+            // 🌟 【追加】クリックイベント（selectRiboPosition）で再利用するためにキャッシュを保存
+            window.LAST_COMPUTED_METRICS = computedMetrics;
+            window.LAST_BASELINE_METRICS = baselineMetrics;
+            
+            drawRiboMetricsLineChart(computedMetrics, baselineMetrics, currentComparisonMode);
+            drawRiboHeatmap(activeMatrix);
+            renderRiboWebLogo(activeMatrix, currentSelectedRiboSiteIdx);
+            updateMetricsConsole(activeMatrix, computedMetrics, currentSelectedRiboSiteIdx);
+
+        }).catch(function(err) {
+            console.error("Asynchronous routing calculation failure inside RiboBrowser thread loop:", err);
+        });
+    }
+    
+    function handleFastaUpload(input) {
+        if (!input || !input.files || input.files.length === 0) return;
+        var file = input.files[0];
+        var reader = new FileReader();
+        var outputElement = document.getElementById("optimizationOutput");
+        if (outputElement) {
+            outputElement.innerText = "Reading uploaded file: " + 
+                file.name + "...";
+        }
+
+        reader.onload = function(e) {
+            var seqInputEl = document.getElementById("sequenceInput");
+            if (seqInputEl) seqInputEl.value = e.target.result;
+            if (outputElement) {
+                outputElement.innerText = "File loaded successfully! " + 
+                    "Click 'Run Optimization' to process.";
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    window.addEventListener('DOMContentLoaded', function() {
+        var speciesSelectEl = document.getElementById('speciesSelect');
+        var defaultSpecies = speciesSelectEl ? 
+            speciesSelectEl.value : "Homo_sapiens_pa";
+        if (defaultSpecies === "user_custom" && 
+            !codonWeightsDatabase.user_custom) {
+            defaultSpecies = "Homo_sapiens_pa"; 
+            if (speciesSelectEl) speciesSelectEl.value = "Homo_sapiens_pa";
+        }
+        if (typeof updateBrowser === "function") updateBrowser(0);
+        
+        var slider = document.getElementById("riboSlider");
+        if (slider) {
+            slider.min = "0";
+            slider.max = String(RIBO_TOTAL_SITES - 1);
+        }
+        
+        updateRiboBrowser();
+    });
+    
+    // =========================================================================
+    // --- METAGENE REGRESSION PIPELINE ENGINE (SELECTION 2 BACKEND) ---
+    // =========================================================================
+
+    // Section 3で初期化済みのグローバル変数バッファへ安全にアサイン
+    rawCodonFileData = null; 
+    rawTpmFileData = null;
+    computedCoeffsBlobText = "";
+    computedPredsBlobText = "";
+    autoBaseName = "expression_matrix";
+
+    window.addEventListener('DOMContentLoaded', function() {
+        var cFileEl = document.getElementById("codonFile");
+        var tFileEl = document.getElementById("tpmFile");
+        
+        if (cFileEl) {
+            cFileEl.addEventListener("change", function(e) {
+                if(e.target.files.length > 0) {
+                    var r = new FileReader();
+                    r.onload = function(evt) { rawCodonFileData = evt.target.result; checkFilesReady(); };
+                    r.readAsText(e.target.files[0]);
+                }
+            });
+        }
+        if (tFileEl) {
+            tFileEl.addEventListener("change", function(e) {
+                if(e.target.files.length > 0) {
+                    var f = e.target.files[0];
+                    autoBaseName = f.name.replace(/\.[^/.]+$/, ""); 
+                    var r = new FileReader();
+                    r.onload = function(evt) { rawTpmFileData = evt.target.result; checkFilesReady(); };
+                    r.readAsText(f);
+                }
+            });
+        }
+    });
+
+    function checkFilesReady() {
+        var msg = [];
+        if(rawCodonFileData) msg.push("Multi-FASTA OK");
+        if(rawTpmFileData) msg.push("Abundance OK");
+        var statusField = document.getElementById("pipelineStatus");
+        if (statusField) {
+            statusField.innerText = msg.join(" | ") + " -> Ready for Python-replicated regression.";
+            statusField.style.color = "#0066cc";
+        }
+    }
+
+    function loadDemoPipelineData() {
+        autoBaseName = "Escherichia_coli_real_benchmark";
+        var statusField = document.getElementById("pipelineStatus");
+        var outputElement = document.getElementById("customWeightOutput");
+        
+        if (statusField) statusField.innerText = "Fetching E. coli files from ./demo/ directory...";
+        
+        Promise.all([
+            fetch("demo/Escherichia_coli.cds.all.fa").then(function(res) { if(!res.ok) throw new Error("Missing Escherichia_coli.cds.all.fa"); return res.text(); }),
+            fetch("demo/Escherichia_coli_PA.txt").then(function(res) { if(!res.ok) throw new Error("Missing Escherichia_coli_PA.txt"); return res.text(); })
+        ])
+        .then(function(texts) {
+            rawCodonFileData = texts[0];
+            rawTpmFileData = texts[1];
+            
+            if (statusField) {
+                statusField.innerText = "✓ Loaded Escherichia_coli.cds.all.fa & Escherichia_coli_PA.txt into cache.";
+                statusField.style.color = "#28a745";
+            }
+            if (outputElement) {
+                outputElement.innerText = "SUCCESSFULLY INGESTED E. COLI BENCHMARK DATASET!\n" +
+                    " - File Path 1: ./demo/Escherichia_coli.cds.all.fa\n" +
+                    " - File Path 2: ./demo/Escherichia_coli_PA.txt\n\n" +
+                    "Click the 'Run linear regression' button to obtain codon weights!";
+            }
+        })
+        .catch(function(err) {
+            if (statusField) {
+                statusField.innerText = "❌ Demo Fetch Error";
+                statusField.style.color = "#a94442";
+            }
+            if (outputElement) {
+                outputElement.innerText = "Failed to load demo files from local directory.\nReason: " + err.message;
+            }
+        });
+    }
+
+    function executeWebPipelineRegression() {
+        if (!rawCodonFileData || !rawTpmFileData) {
+            alert("Pipeline Error: Missing files. Please load Multi-FASTA + Abundance profiles.");
+            return;
+        }
+
+        var threshold = parseFloat(document.getElementById("pipelineThreshold").value) || 0.0;
+        var logTransform = document.getElementById("pipelineLogTransform").value; 
+        var statusField = document.getElementById("pipelineStatus");
+        var outputElement = document.getElementById("customWeightOutput");
+
+        if (statusField) statusField.innerText = "Parsing files & computing compositions...";
+
+        // --- [STEP 1] Multi-FASTA Parsing ---
+        var fastaRecords = {};
+        var fastaLines = rawCodonFileData.split(/\r?\n/);
+        var currentGeneId = "";
+        var currentSeqAccumulator = [];
+
+        for (var l = 0; l < fastaLines.length; l++) {
+            var line = fastaLines[l].trim();
+            if (!line) continue;
+            if (line.charAt(0) === '>') {
+                if (currentGeneId && currentSeqAccumulator.length > 0) {
+                    fastaRecords[currentGeneId] = currentSeqAccumulator.join("");
+                }
+                var cleanHeaderLine = line.substring(1).trim();
+                currentGeneId = cleanHeaderLine.split(" ")[0].toUpperCase();
+                currentSeqAccumulator = [];
+            } else {
+                currentSeqAccumulator.push(line.toUpperCase());
+            }
+        }
+        if (currentGeneId && currentSeqAccumulator.length > 0) {
+            fastaRecords[currentGeneId] = currentSeqAccumulator.join("");
+        }
+
+        // --- [STEP 2] TPM / Abundance Parsing ---
+        var tpmLines = rawTpmFileData.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+        var tpmDelimiter = rawTpmFileData.includes("\t") ? "\t" : ",";
+        var tpmMap = {};
+        var tpmColsMap = {}; // ★【追加】各列の生数値を個別に保持するマップ
+
+        for (var i = 1; i < tpmLines.length; i++) {
+            var cols = tpmLines[i].split(tpmDelimiter);
+            if (cols.length < 2) continue;
+            var targetId = cols[0].trim().toUpperCase();
+            
+            // 原型を維持しつつ、全列の生数値を配列に格納＆生合計を計算
+            var targetVal = 0;
+            var currentGeneCols = []; // ★【追加】
+            
+            for (var c = 1; c < cols.length; c++) {
+                var v = parseFloat(cols[c]);
+                if (!isNaN(v)) {
+                    targetVal += v;
+                    currentGeneCols.push(v); // ★【追加】
+                }
+            }
+            
+            if (!isNaN(targetVal)) {
+                tpmMap[targetId] = targetVal;     // 元の閾値判定用に生合計を保持
+                tpmColsMap[targetId] = currentGeneCols; // ★【追加】各列の配列を保存
+            }
+        }
+
+        var sortedCodonsList = [].concat(CODONS).sort();
+        var mergedDataset = [];
+
+        // --- [ALGORITHM] Frequencies, CLR, and Abundance Log Transformation ---
+        Object.keys(fastaRecords).forEach(function(geneId) {
+            if (tpmMap[geneId] === undefined) return;
+
+            var rawTpm = tpmMap[geneId];
+            if (rawTpm <= threshold) return;
+
+            var fullSeq = fastaRecords[geneId].replace(/[^A-Za-z]/g, '').replace(/U/g, 'T');
+            if (fullSeq.length < 3) return;
+
+            var usableLength = Math.floor(fullSeq.length / 3) * 3;
+            var counts = new Float64Array(64).fill(0);
+            
+            for (var i = 0; i < usableLength; i += 3) {
+                var codon = fullSeq.substring(i, i + 3);
+                if (CODON_INDEX[codon] !== undefined) counts[CODON_INDEX[codon]] += 1;
+            }
+
+            var totalCodons = usableLength / 3;
+            var sortedFrequencies = new Float64Array(64);
+            sortedCodonsList.forEach(function(codon, idx) {
+                var rawCount = counts[CODON_INDEX[codon]];
+                var freq = rawCount / totalCodons;
+                sortedFrequencies[idx] = (freq === 0) ? 1e-6 : freq;
+            });
+
+            var logCounts = new Float64Array(64);
+            var logSum = 0;
+            for (var k = 0; k < 64; k++) {
+                logCounts[k] = Math.log(sortedFrequencies[k]);
+                logSum += logCounts[k];
+            }
+            var logMean = logSum / 64;
+            var finalClrFeatures = new Float64Array(64);
+            for (var k = 0; k < 64; k++) {
+                finalClrFeatures[k] = logCounts[k] - logMean;
+            }
+            
+            // 各列のlogをとってから『平均値』を回帰に用いる
+            var transformedY = 0;
+            var geneCols = tpmColsMap[geneId] || [];
+            var validColCount = 0;
+            
+            geneCols.forEach(function(v) {
+                // 🌟 安全対策：万が一 NaN やマイナスの値が混入していたらスキップ
+                if (isNaN(v) || v < 0) return; 
+
+                if (logTransform === "log1p") {
+                    transformedY += Math.log1p(v);
+                    validColCount++;
+                } else if (logTransform === "log10") {
+                    // 🌟 0 ちょうどだけでなく、1e-6 未満の極小値や 0 を一律で 1e-6 に安全に置換
+                    var safeV = (v < 1e-6) ? 1e-6 : v;
+                    transformedY += Math.log10(safeV);
+                    validColCount++;
+                } else {
+                    transformedY += v;
+                    validColCount++;
+                }
+            });
+
+            // 19列の合計ではなく、列数で割って「単一の発現量スケール（平均値）」に変換
+            if (validColCount > 0) {
+                transformedY = transformedY / validColCount;
+            } else {
+                // 🌟 万が一、有効な列が1つもなかった（すべてNaNなど）場合は解析から除外
+                return; 
+            }
+
+            mergedDataset.push({ id: geneId, x: finalClrFeatures, y: transformedY, rawTpm: rawTpm });
+
+        });
+
+        var n = mergedDataset.length;
+        var P = 63; // 63 independent features to safely un-trap CLR collinearity
+        if (n < 65) {
+            alert("Pipeline Error: Linear regression requires at least 65 matched samples. Matched N = " + n);
+            return;
+        }
+
+        if (statusField) statusField.innerText = "Solving Non-Singular OLS Regression Engine...";
+
+        // --- [ALGORITHM STEP 3] Multiple Regression Preparation ---
+        var meanX = new Float64Array(P);
+        var meanY = 0;
+        mergedDataset.forEach(function(gene) {
+            meanY += gene.y;
+            for (var j = 0; j < P; j++) meanX[j] += gene.x[j];
+        });
+        meanY /= n;
+        for (var j = 0; j < P; j++) meanX[j] /= n;
+
+        // --- Matrix Construction ---
+        var XtX = Array.from({ length: P }, function() { return new Float64Array(P); });
+        var XtY = new Float64Array(P);
+
+        mergedDataset.forEach(function(gene) {
+            var diffY = gene.y - meanY;
+            for (var j = 0; j < P; j++) {
+                var diffXj = gene.x[j] - meanX[j]; 
+                XtY[j] += diffXj * diffY;
+                for (var k = 0; k < P; k++) {
+                    XtX[j][k] += diffXj * (gene.x[k] - meanX[k]);
+                }
+            }
+        });
+
+        // --- Gauss-Jordan System Solver ---
+        var augMatrix = Array.from({ length: P }, function() { return new Float64Array(P + 1); });
+        for (var j = 0; j < P; j++) {
+            for (var k = 0; k < P; k++) augMatrix[j][k] = XtX[j][k];
+            augMatrix[j][P] = XtY[j];
+        }
+
+        for (var i = 0; i < P; i++) {
+            var pivot = augMatrix[i][i];
+            if (Math.abs(pivot) < 1e-12) {
+                augMatrix[i][i] = 1.0;
+                augMatrix[i][P] = 0.0;
+                continue;
+            }
+            for (var j = i; j <= P; j++) augMatrix[i][j] /= pivot;
+            for (var k = 0; k < P; k++) {
+                if (k !== i) {
+                    var factor = augMatrix[k][i];
+                    for (var j = i; j <= P; j++) augMatrix[k][j] -= factor * augMatrix[i][j];
+                }
+            }
+        }
+
+        var intermediateCoef = new Float64Array(P);
+        for (var j = 0; j < P; j++) intermediateCoef[j] = augMatrix[j][P];
+
+        // --- Zero-Sum Symmetrical Rebalancing back to 64 Dimensions ---
+        var trainedCoef = new Float64Array(64);
+        var intermediateSum = 0;
+        for (var j = 0; j < 63; j++) {
+            trainedCoef[j] = intermediateCoef[j];
+            intermediateSum += intermediateCoef[j];
+        }
+        var balancingFactor = intermediateSum / 64;
+        for (var j = 0; j < 64; j++) {
+            if (j < 63) trainedCoef[j] -= balancingFactor;
+            else trainedCoef[j] = -balancingFactor;
+        }
+
+        // Recover accurate OLS Intercept
+        var fullMeanXSum = 0;
+        for (var j = 0; j < 64; j++) {
+            var codonMeanX = 0;
+            mergedDataset.forEach(function(g) { codonMeanX += g.x[j]; });
+            codonMeanX /= n;
+            fullMeanXSum += trainedCoef[j] * codonMeanX;
+        }
+        var finalIntercept = meanY - fullMeanXSum;
+
+        // Sync variables for outer interface databases
+        var webEngineCoef = new Float64Array(64);
+        CODONS.forEach(function(codon, idx) {
+            var sortedIdx = sortedCodonsList.indexOf(codon);
+            webEngineCoef[idx] = trainedCoef[sortedIdx];
+        });
+
+        codonWeightsDatabase.user_custom = {
+            intercept: finalIntercept,
+            coef: webEngineCoef,
+            log_transform: logTransform
+        };
+
+        var customOpt = document.getElementById("customOption");
+        if (customOpt) {
+            customOpt.disabled = false;
+            customOpt.innerText = "★ User-uploaded pipeline model (ACTIVE)";
+            document.getElementById("speciesSelect").value = "user_custom";
+        }
+
+        // --- Generate File Strings ---
+        computedCoeffsBlobText = "variable\tcoef\n";
+        sortedCodonsList.forEach(function(codon, idx) {
+            computedCoeffsBlobText += codon + "\t" + trainedCoef[idx].toFixed(16) + "\n";
+        });
+        computedCoeffsBlobText += "(Intercept)\t" + finalIntercept.toFixed(16) + "\n";
+
+        computedPredsBlobText = "gene_id\tobserved_abundance\ttransformed_y\tpredicted_y\n";
+        mergedDataset.forEach(function(gene) {
+            var pred = finalIntercept;
+            sortedCodonsList.forEach(function(codon, cIdx) { 
+                pred += trainedCoef[cIdx] * gene.x[cIdx]; 
+            });
+            computedPredsBlobText += gene.id + "\t" + gene.rawTpm.toFixed(4) + "\t" + gene.y.toFixed(6) + "\t" + pred.toFixed(6) + "\n";
+        });
+
+        var btnCoeffs = document.getElementById("btnDlCoeffs");
+        var btnPreds = document.getElementById("btnDlPreds");
+
+        // 無効化を解除
+        btnCoeffs.removeAttribute("disabled");
+        btnPreds.removeAttribute("disabled");
+
+        // 🌟 JavaScriptから直接背景色（background）と文字色（color）を変更
+        btnCoeffs.style.backgroundColor = "#008866"; // セクション6のテーマカラー（青）
+        btnCoeffs.style.color = "#ffffff";           // 文字を白に
+        btnCoeffs.style.cursor = "pointer";          // マウスカーソルをポインターに
+
+        btnPreds.style.backgroundColor = "#ee00cc";
+        btnPreds.style.color = "#ffffff";
+        btnPreds.style.cursor = "pointer";
+
+        // --- Report Log Formatting ---
+        var allIndicesSorted = Array.from({length: 64}, function(_, i) { return i; }).sort(function(a, b) { return trainedCoef[b] - trainedCoef[a]; });
+        
+        var sumP_stat = 0, sumO_stat = 0;
+        mergedDataset.forEach(function(gene) {
+            var predY = finalIntercept;
+            sortedCodonsList.forEach(function(codon, cIdx) { predY += trainedCoef[cIdx] * gene.x[cIdx]; });
+            sumP_stat += predY;
+            sumO_stat += gene.y;
+        });
+        var meanP_stat = sumP_stat / n;
+        var meanO_stat = sumO_stat / n;
+
+        var num_stat = 0, denP_stat = 0, denO_stat = 0;
+        mergedDataset.forEach(function(gene) {
+            var predY = finalIntercept;
+            sortedCodonsList.forEach(function(codon, cIdx) { predY += trainedCoef[cIdx] * gene.x[cIdx]; });
+            var diffP = predY - meanP_stat;
+            var diffO = gene.y - meanO_stat;
+            num_stat += diffP * diffO;
+            denP_stat += diffP * diffP;
+            denO_stat += diffO * diffO;
+        });
+
+        var rValue = (denP_stat > 0 && denO_stat > 0) ? (num_stat / Math.sqrt(denP_stat * denO_stat)) : 0;
+        var rSquared = rValue * rValue;
+
+        var pValue = 1.0;
+        if (n > 2 && Math.abs(rValue) < 1.0) {
+            var tStat = rValue * Math.sqrt((n - 2) / (1.0 - rSquared));
+            var df = n - 2;
+            var z = Math.abs(tStat);
+            var t_approx = (z - (z*z*z + z) / (4 * df));
+            var errorFunc = function(val) {
+                var sign = (val >= 0) ? 1 : -1;
+                var absX = Math.abs(val) / Math.sqrt(2.0);
+                var t = 1.0 / (1.0 + 0.3275911 * absX);
+                var y = 1.0 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * Math.exp(-absX * absX);
+                return 0.5 * (1.0 + sign * y);
+            };
+            pValue = 2.0 * (1.0 - errorFunc(t_approx));
+            if (pValue < 0) pValue = 0;
+            if (pValue > 1) pValue = 1;
+        } else if (Math.abs(rValue) >= 1.0) {
+            pValue = 0.0;
+        }
+
+        var logText = "--- USER DATA LINEAR REGRESSION PIPELINE REPORT ---\n";
+        logText += "Mathematical core   : Multiple linear regression (CLR non-singular OLS solution)\n";
+        logText += "Abundance log space : " + logTransform.toUpperCase() + "\n";
+        logText += "Expression threshold: " + threshold + "\n";
+        logText += "Calculated intercept: " + finalIntercept.toFixed(6) + "\n";
+        
+        logText += "Model evaluation    : \n";
+        logText += "  - Correlation (R) : " + rValue.toFixed(4) + "\n";
+        logText += "  - R-squared (R²)  : " + rSquared.toFixed(4) + " (" + (rSquared * 100).toFixed(2) + "% of variance explained)\n";
+        logText += "  - p-value (Test)  : " + (pValue < 1e-16 ? "< 1e-16 (Highly Significant)" : pValue.toExponential(4)) + "\n\n";
+
+        logText += "🟢 TOP 3 STRONGEST CODON WEIGHTS (Positive / Enhancers):\n";
+        for (var g = 0; g < 3; g++) {
+            var idx = allIndicesSorted[g];
+            logText += "  " + sortedCodonsList[idx] + " : " + trainedCoef[idx].toFixed(6) + "\n";
+        }
+        logText += "\n🔴 WORST 3 WEAKEST CODON WEIGHTS (Negative / Suppressors):\n";
+        for (var g = 63; g >= 61; g--) {
+            var idx = allIndicesSorted[g];
+            logText += "  " + sortedCodonsList[idx] + " : " + trainedCoef[idx].toFixed(6) + "\n";
+        }
+        logText += "\n📋 ALL 64 CODON WEIGHT PROFILE (ranked high to low):\n";
+        for (var idx = 0; idx < 64; idx++) {
+            var sIdx = allIndicesSorted[idx];
+            logText += "  [" + (idx + 1) + "] " + sortedCodonsList[sIdx] + " : " + trainedCoef[sIdx].toFixed(6) + "\n";
+        }
+
+        logText += "\nSuccess: Native browser OLS regression completed. Scatter plot rendered below.";
+        document.getElementById("customWeightOutput").innerText = logText;
+
+        // --- Canvas Drawing Section ---
+        (function drawScatterPlot() {
+            var plotContainer = document.getElementById("plotContainer");
+            var canvas = document.getElementById("regressionPlot");
+            if (!canvas || !plotContainer) return;
+            
+            plotContainer.style.display = "block";
+            var ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            var plotPoints = [];
+            var minObs = Infinity, maxObs = -Infinity;
+            var minPred = Infinity, maxPred = -Infinity;
+
+            mergedDataset.forEach(function(gene) {
+                var predY = finalIntercept;
+                sortedCodonsList.forEach(function(codon, cIdx) { predY += trainedCoef[cIdx] * gene.x[cIdx]; });
+                plotPoints.push({ pred: predY, obs: gene.y });
+                
+                if (gene.y < minObs) minObs = gene.y; if (gene.y > maxObs) maxObs = gene.y;
+                if (predY < minPred) minPred = predY; if (predY > maxPred) maxPred = predY;
+            });
+
+            var padding = 35;
+            var graphWidth = canvas.width - padding * 2;
+            var graphHeight = canvas.height - padding * 2;
+
+            var obsRange = maxObs - minObs; if (obsRange <= 0) obsRange = 1.0;
+            var predRange = maxPred - minPred; if (predRange <= 0) predRange = 1.0;
+            
+            var startX = minPred - predRange * 0.1; var endX = maxPred + predRange * 0.1; 
+            var startY = minObs - obsRange * 0.1; var endY = maxObs + obsRange * 0.1;     
+
+            function getCanvasX(val) { return padding + ((val - startX) / (endX - startX)) * graphWidth; }
+            function getCanvasY(val) { return canvas.height - padding - ((val - startY) / (endY - startY)) * graphHeight; }
+
+            ctx.strokeStyle = "#f5f5f5"; ctx.lineWidth = 1;
+            for (var i = 0; i <= 4; i++) {
+                var valX = startX + (endX - startX) * (i / 4);
+                var valY = startY + (endY - startY) * (i / 4);
+                var cx = getCanvasX(valX); var cy = getCanvasY(valY);
+                
+                ctx.beginPath(); ctx.moveTo(cx, padding); ctx.lineTo(cx, canvas.height - padding); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(padding, cy); ctx.lineTo(canvas.width - padding, cy); ctx.stroke();
+                
+                ctx.fillStyle = "#666"; ctx.font = "8px sans-serif"; ctx.textAlign = "center";
+                ctx.fillText(valX.toFixed(1), cx, canvas.height - padding + 10); 
+                ctx.fillText(valY.toFixed(1), padding - 10, cy + 3);             
+            }
+
+            ctx.fillStyle = "rgba(34, 139, 34, 0.6)";
+            plotPoints.forEach(function(pt) {
+                ctx.beginPath();
+                ctx.arc(getCanvasX(pt.pred), getCanvasY(pt.obs), 2.5, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            ctx.strokeStyle = "#222222"; ctx.lineWidth = 1.0;
+            ctx.strokeRect(padding, padding, graphWidth, graphHeight);
+
+            ctx.fillStyle = "#111"; ctx.font = "bold 9px sans-serif"; ctx.textAlign = "center";
+            ctx.fillText("Predicted value", canvas.width / 2, canvas.height - 4);
+        })();
+
+        if (statusField) {
+            statusField.innerText = "✓ System parity executed. Scatter plot refreshed.";
+            statusField.style.color = "#28a745";
+        }
+        
+        var slider = document.getElementById('siteSlider');
+        if (slider && typeof updateBrowser === "function") {
+            updateBrowser(slider.value);
+        }
+    }
+
+    function downloadPipelineCoeffs() {
+        if (!computedCoeffsBlobText) return;
+        var blob = new Blob([computedCoeffsBlobText], { type: "text/tab-separated-values" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = autoBaseName + ".linear.coeffs.tsv";
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadPipelinePreds() {
+        if (!computedPredsBlobText) return;
+        var blob = new Blob([computedPredsBlobText], { type: "text/tab-separated-values" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = autoBaseName + ".linear.predictions.tsv";
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+        window.loadIndependentRiboData = function(targetedSpeciesValue) {
+        if (typeof fetchAndRegisterRiboData === "function") {
+            fetchAndRegisterRiboData(targetedSpeciesValue).then(function(matrix) {
+                if (typeof drawRiboHeatmap === "function") drawRiboHeatmap(matrix);
+                if (typeof renderRiboWebLogo === "function") renderRiboWebLogo(matrix, currentSelectedRiboSiteIdx);
+            }).catch(function(err) {
+                console.error("Failed to load Ribo-seq data for: " + targetedSpeciesValue, err);
+            });
+        } else if (typeof updateRiboBrowser === "function") {
+            // セレクトボックスの値を反映させてブラウザ全体を再描画する既存フォールバック
+            updateRiboBrowser();
+        }
+    };
+    
+    /**
+     * Triggers a localized browser download of a dynamic string/data source
+     * @param {string} dataUrl - Target compiled URI asset source
+     * @param {string} defaultFilename - Output file configuration payload
+     */
+
+    function triggerBrowserAssetDownload(dataUrl, defaultFilename) {
+        const downloadLink = document.createElement("a");
+        downloadLink.download = defaultFilename;
+        downloadLink.href = dataUrl;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+    
+    /**
+     * Resolves current active organism selection value suffix string
+     * @returns {string} Clean string reference of active dataset
+     */
+    function getActiveOrganismSuffix() {
+        const selectElem = document.getElementById("riboSpeciesSelect");
+        return selectElem ? selectElem.value : "unspecified_organism";
+    }
+    
+    /**
+     * Card 4: Exports live heatmap presentation matrix grid canvas to PNG
+     */
+    function exportBrowserGraphics() {
+        const canvasElement = document.getElementById("riboHeatmap");
+        
+        if (!canvasElement) {
+            console.error("Target platform artifact 'riboHeatmap' could not be found.");
+            alert("Export Error: The main matrix heatmap canvas could not be extracted.");
+            return;
+        }
+    
+        try {
+            // Capture canvas state context at full resolution
+            const exportUri = canvasElement.toDataURL("image/png", 1.0);
+            const fileName = `riboseq_heatmap_profile_${getActiveOrganismSuffix()}.png`;
+            triggerBrowserAssetDownload(exportUri, fileName);
+        } catch (fault) {
+            console.error("Canvas serialization halted:", fault);
+            alert("Export failure: Ensure no cross-origin assets (CORS) are taint-marking the matrix canvas layers.");
+        }
+    }
+
+</script>
+</body>
+</html>

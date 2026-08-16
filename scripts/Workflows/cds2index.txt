@@ -1,0 +1,1318 @@
+#The following indices will be tested for correlations with mRNA expression (TPM), translation efficiency (ribosome-associated RNA-Seq data) and mRNA half lives (curated from previous studies)
+#GT3
+#CAI from all CDSs (and subsets based on translation efficiency and/or mRNA half lives)
+#stAI: https://doi.org/10.1093/dnares/dsu017 https://doi.org/10.1093/bioinformatics/btw647
+#gtAI: https://doi.org/10.3389/fmolb.2023.1218518
+#Demand-adjusted tAI (DtAI): This study: The tRNA gene number frequencies will be divided by the sum of the (wobble-corrected) frequencies of corresponding codons and used for tAI (i.e., geometric mean) calculation
+
+#stAIcalc standalone version for Windows was downloaded from the official site https://tau-tai.azurewebsites.net/
+#The above was taking too long and a custom script was made by the aid of Copilot
+#gtAI python script made in the above article was analyzed and made compatible with a command-line by Copilot
+
+#The input files for stAIcalc and gtAI should be a fasta file and tRNA gene number file as follows
+AntiCodonsList	tGCN
+AAA	0
+GAA	10
+TAA	7
+CAA	10
+AGA	11
+GGA	0
+TGA	3
+CGA	1
+ATA	0
+GTA	8
+TTA	0
+CTA	0
+ACA	0
+GCA	4
+TCA	0
+CCA	6
+AAG	0
+GAG	1
+TAG	3
+CAG	0
+AGG	2
+GGG	0
+TGG	10
+CGG	0
+ATG	0
+GTG	7
+TTG	9
+CTG	1
+ACG	6
+GCG	0
+TCG	0
+CCG	1
+AAT	13
+GAT	0
+TAT	2
+CAT	10
+AGT	11
+GGT	0
+TGT	4
+CGT	1
+ATT	0
+GTT	10
+TTT	7
+CTT	14
+ACT	0
+GCT	2
+TCT	11
+CCT	1
+AAC	14
+GAC	0
+TAC	2
+CAC	2
+AGC	11
+GGC	0
+TGC	5
+CGC	0
+ATC	0
+GTC	16
+TTC	14
+CTC	2
+ACC	0
+GCC	16
+TCC	3
+CCC	2
+
+#############################
+#For gene ID conversion
+#After downloading the protein sequence data from Ensembl Human and Mouse
+cd CDS
+perl -nle 'if (/^>([\w\.]+).*gene:(\w+).*transcript:([\w\.]+)/){($prot,$gene,$mrna)=($1,$2,$3); print "$gene\t$mrna\t$prot";}' Homo_sapiens*.pep.all.fa > Homo_sapiens_gene_mRNA_pep_ID.txt
+perl -nle 'if (/^>([\w\.]+).*gene:(\w+).*transcript:([\w\.]+)/){($prot,$gene,$mrna)=($1,$2,$3); print "$gene\t$mrna\t$prot";}' Mus_musculus*.pep.all.fa > Mus_musculus_gene_mRNA_pep_ID.txt
+
+For the other species
+for i in Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica; do
+  perl -nle '
+  my ($gene, $mrna);
+  if (/^>(\S+).*\bgene:(\S+)/) {
+      # 1. "gene:" キーワードが含まれるEnsembl形式など
+      ($gene, $mrna) = ($2, $1);
+  } elsif (/^>(\S+)/) {
+      # 2. キーワードがない場合、先頭のIDを両方に割り当てる（NCBIやUniProtなど）
+      ($gene, $mrna) = ($1, $1);
+  }
+  print "$gene\t$mrna" if $gene;
+' ${i}*cds.all.fa > ${i}_gene_mRNA_ID.txt
+done
+
+#############################
+#Running programs
+
+#For stAI
+mkdir CDS/stAI
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do python3 stAI_calc.py CDS/$i*.cds.all.fa DT_PCA/$i*_tRNA_genenum.txt > CDS/stAI/$i.stAI0.txt; done
+
+#To make the gene names compatible with further analyses
+cd CDS/stAI
+#rename 's/stAI\.txt/stAI0.txt/' *.stAI.txt
+for i in Arabidopsis*.stAI0.txt Oryza*.stAI0.txt
+do
+  filename=`echo $i|perl -pe 's/AI0\.txt/AI.txt/'`
+  perl -e '
+  %stai;
+  print "gene\tstAI\n";
+  while(<>){
+    ($gene, $val) = ($1, $2) if /([\w-]+).*\t(.*?)$/;
+    $gene =~ s/^AT/gene:AT/; #For Arabidopsis
+    $gene =~ s/^Os(\d+)t(\d+).*/gene:Os$1g$2/; #For rice
+    #$gene =~ s/^ENST/gene:ENSG/; #For human
+    #$gene =~ s/^ENSMUST/gene:ENSMUSG/; #For mouse
+    $stai{$gene} = $val;
+  }
+  for $i (sort keys %stai){print "$i\t$stai{$i}\n";}
+  ' $i > $filename
+done
+
+for i in Homo*.stAI0.txt Mus*.stAI0.txt
+do
+  filename=`echo $i|perl -pe 's/AI0\.txt/AI.txt/'`
+  perl -se '
+  $idfile = "../Homo_sapiens_gene_mRNA_pep_ID.txt";
+  if ($filename =~ /^Mus/){$idfile = "../Mus_musculus_gene_mRNA_pep_ID.txt";}
+  %mr2g;
+  open(IF, "< $idfile") or die;
+  while($line=<IF>){
+    ($gid,$mrid,$pid)=split("\t",$line);
+    $mr2g{$mrid}=$gid;
+  }
+  close(IF);
+  %stai;
+  print "gene\tstAI\n";
+  while(<>){
+    ($mrna, $val) = ($1, $2) if /([\w\.]+).*\t(.*?)$/;
+    $stai{$mr2g{$mrna}} = $val;
+  }
+  for $i (sort keys %stai){print "gene:$i\t$stai{$i}\n";}
+  ' -- -filename=$filename $i > $filename
+done
+
+#########################################
+#For gtAI
+mkdir CDS/gtAI
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do python3 run_gtAI.py CDS/$i*.cds.all.fa DT_PCA/$i*_tRNA_genenum.txt > CDS/gtAI/$i.gtAI.log.txt 2> CDS/gtAI/$i.gtAI.txt; done
+#This is to separate the log messages, which are output in the standard output, from the results
+#many spaces were present in the resulting file and corrected them as follows
+cd CDS/gtAI
+rename 's/gtAI\.txt/gtAI0.txt/' *.gtAI.txt
+for i in *.gtAI0.txt
+do
+  filename=`echo $i|perl -pe 's/AI0\.txt/AI.txt/'`
+  perl -e '
+  %gtai;
+  print "gene\tgtAI\n";
+  while(<>){
+    $gtai{$1} = $2 if /(gene:[\w-]+).* (.*?)$/;
+  }
+  for $i (sort keys %gtai){print "$i\t$gtai{$i}\n";}
+  ' $i > $filename
+done
+
+#########################################
+#For DtAI
+#To prepare codon count files
+mkdir CDS/DtAI
+cd CDS
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do
+  cp ../DT_PCA/$i*_tRNA_genenum.txt DtAI/
+  perl -e '@lines=<>; @codons=split("\t", $lines[0]); @counts=split("\t", $lines[-1]); for $i (1..64){print "$codons[$i]\t$counts[$i]\n";}' codon_num_in_CDSs/$i*.codon_num.txt > DtAI/$i.all_codon_num.txt
+done
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do python3 ../DtAI_calc.py $i*.cds.all.fa DtAI/$i*_tRNA_genenum.txt DtAI/$i.all_codon_num.txt > DtAI/$i.DtAI0.txt; done
+
+#For demand- and supply-based DtAI
+#Total demand and supply data were made on R
+cd CDS
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do python3 ../DtAI_calc.py $i*.cds.all.fa DtAI/${i}_anticodon-supply_mean.txt DtAI/${i}_codon-demand_mean.txt > DtAI/${i}_demand-supply.DtAI0.txt; done
+
+cd DtAI
+
+for i in Arabidopsis*.DtAI0.txt Oryza*.DtAI0.txt
+do
+  filename=`echo $i|perl -pe 's/AI0\.txt/AI.txt/'`
+  perl -e '
+  %stai;
+  print "gene\tDtAI\n";
+  while(<>){
+    ($gene, $val) = ($1, $2) if /([\w-]+).*\t(.*?)$/;
+    $gene =~ s/^AT/gene:AT/; #For Arabidopsis
+    $gene =~ s/^Os(\d+)t(\d+).*/gene:Os$1g$2/; #For rice
+    $stai{$gene} = $val;
+  }
+  for $i (sort keys %stai){print "$i\t$stai{$i}\n";}
+  ' $i > $filename
+done
+
+for i in Homo*.DtAI0.txt Mus*.DtAI0.txt
+do
+  filename=`echo $i|perl -pe 's/AI0\.txt/AI.txt/'`
+  perl -se '
+  $idfile = "../Homo_sapiens_gene_mRNA_pep_ID.txt";
+  if ($filename =~ /^Mus/){$idfile = "../Mus_musculus_gene_mRNA_pep_ID.txt";}
+  %mr2g;
+  open(IF, "< $idfile") or die;
+  while($line=<IF>){
+    ($gid,$mrid,$pid)=split("\t",$line);
+    $mr2g{$mrid}=$gid;
+  }
+  close(IF);
+  %stai;
+  print "gene\tDtAI\n";
+  while(<>){
+    ($mrna, $val) = ($1, $2) if /([\w\.]+).*\t(.*?)$/;
+    $stai{$mr2g{$mrna}} = $val;
+  }
+  for $i (sort keys %stai){print "gene:$i\t$stai{$i}\n";}
+  ' -- -filename=$filename $i > $filename
+done
+
+##################################
+#For CAI from all CDSs
+cd CDS
+mkdir CAI
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do cusp -sequence $i*.cds.all.fa -outfile CAI/$i.cds.all.cu.table; done
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus
+do cai -seqall $i*.cds.all.fa -cfile CAI/$i.cds.all.cu.table -outfile CAI/$i.cds.all.cai0.txt; done
+
+cd CAI
+for i in Arabidopsis*.cai0.txt Oryza*.cai0.txt
+do
+  filename=`echo $i|perl -pe 's/cai0\.txt/cai.txt/'`
+  perl -e '
+  %stai;
+  print "gene\tCAI\n";
+  while($line=<>){
+    $line=~s/[\r\n]+//g;
+    $line=~s/^Sequence: //;
+    $line=~s/ CAI: /\t/;
+    ($gene, $val) = ($1, $2) if $line =~ /([\w-]+).*\t(.*?)$/;
+    $gene =~ s/^AT/gene:AT/; #For Arabidopsis
+    $gene =~ s/^Os(\d+)t(\d+).*/gene:Os$1g$2/; #For rice
+    $stai{$gene} = $val;
+  }
+  for $i (sort keys %stai){print "$i\t$stai{$i}\n";}
+  ' $i > $filename
+done
+
+for i in Homo*.cai0.txt Mus*.cai0.txt
+do
+  filename=`echo $i|perl -pe 's/cai0\.txt/cai.txt/'`
+  perl -se '
+  $idfile = "../Homo_sapiens_gene_mRNA_pep_ID.txt";
+  if ($filename =~ /^Mus/){$idfile = "../Mus_musculus_gene_mRNA_pep_ID.txt";}
+  %mr2g;
+  open(IF, "< $idfile") or die;
+  while($line=<IF>){
+    ($gid,$mrid,$pid)=split("\t",$line);
+    $mr2g{$mrid}=$gid;
+  }
+  close(IF);
+  %stai;
+  print "gene\tCAI\n";
+  while($line=<>){
+    $line=~s/[\r\n]+//g;
+    $line=~s/^Sequence: //;
+    $line=~s/ CAI: /\t/;
+    ($mrna, $val) = ($1, $2) if $line =~ /([\w\.]+).*\t(.*?)$/;
+    $stai{$mr2g{$mrna}} = $val;
+  }
+  for $i (sort keys %stai){print "gene:$i\t$stai{$i}\n";}
+  ' -- -filename=$filename $i > $filename
+done
+
+######################################
+#To modify human and mouse data
+cd CDS/codon_freq_in_CDSs
+perl -e '%gcount; while($line=<>){@F=split("\t",$line, 2); $F[0]=~s/\.\d+$//; if(!$gcount{$F[0]}){print "$F[0]\t$F[1]"; $gcount{$F[0]}++;}}' Homo_sapiens.GRCh38.cds.all.fa.codon_freq.txt > Homo_sapiens_codon_freq.txt
+perl -e '%gcount; while($line=<>){@F=split("\t",$line, 2); $F[0]=~s/\.\d+$//; if(!$gcount{$F[0]}){print "$F[0]\t$F[1]"; $gcount{$F[0]}++;}}' Mus_musculus.GRCm39.cds.all.fa.codon_freq.txt > Mus_musculus_codon_freq.txt
+
+#######################################
+#Joining the data
+cd CDS
+mkdir joined_codon_indices
+
+for i in Arabidopsis_thaliana Oryza_sativa
+do python3 ../join_files.py codon_freq_in_CDSs/$i*codon_freq.txt CAI/$i*cai.txt stAI/$i*stAI.txt gtAI/$i*gtAI.txt DtAI/$i*DtAI.txt --no-prefix --na 0 > joined_codon_indices/${i}_joined_indices.txt; done
+
+for i in Homo_sapiens Mus_musculus
+do python3 ../join_files.py codon_freq_in_CDSs/${i}_codon_freq.txt CAI/$i*cai.txt stAI/$i*stAI.txt gtAI/$i*gtAI.txt DtAI/$i*DtAI.txt --no-prefix --na 0 > joined_codon_indices/${i}_joined_indices.txt; done
+
+#######################################
+#For regression
+pip install scikit-learn
+
+perl -aF"\t" -e 'if($.==1){print "$#F\n"; last;}' TPM/Arabidopsis_thaliana_all_gene_tpm.txt #202, which was the column number
+mkdir Arabidopsis_regression
+
+for i in {0..201}
+do
+  python3 codon_tpm_regression_logfreq.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt $i
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Arabidopsis_thaliana_all_gene_tpm.$i.ridge.pred.tsv > Arabidopsis_regression/Arabidopsis_thaliana_all_gene_tpm.$i.ridge.pred.txt
+  mv Arabidopsis_thaliana_all_gene_tpm.$i.ridge.pred.tsv Arabidopsis_thaliana_all_gene_tpm.$i.ridge.coeffs.tsv Arabidopsis_regression/
+done
+
+perl -aF"\t" -nle '$output=join("\t",($F[0],@F[65..69])); print "$output";' Protein_abundance/Arabidopsis_thaliana_joined_indices.txt > CDS/joined_codon_indices/Arabidopsis_thaliana_indicesonly.txt
+python3 join_files.py Arabidopsis_regression/Arabidopsis_thaliana_all_gene_tpm.{0..201}.ridge.pred.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.txt
+cp CDS/joined_codon_indices/Arabidopsis_thaliana_indicesonly.txt CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.txt Protein_abundance
+
+##########################################
+#TPM > 1 version, with a new program file
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --pred_out Arab_regression_mean.pred_default.tsv
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --threshold 1 --pred_out Arab_regression_mean.pred_thr1.tsv
+mv Arab_regression_mean.pred_default.tsv Arab_regression_mean.pred_thr1.tsv Protein_abundance/
+
+mv Arab_regression_mean.pred_thr1.tsv Protein_abundance/
+
+for i in {0..201}
+do
+  python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --tpm_col $i --threshold 1 --pred_out Arab_regression_$i.pred_thr1.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Arab_regression_$i.pred_thr1.tsv > Arabidopsis_regression/Arab_regression_$i.pred_thr1.txt
+  mv Arab_regression_$i.pred_thr1.tsv Arabidopsis_thaliana_all_gene_tpm.$i.ridge.coeffs.tsv Arabidopsis_regression/
+done
+
+python3 join_files.py Arabidopsis_regression/Arab_regression_{0..201}.pred_thr1.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds_thr1.txt
+cp CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds_thr1.txt Protein_abundance/
+
+#For rice
+perl -aF"\t" -e 'if($.==1){print "$#F\n"; last;}' TPM/Oryza_sativa_all_gene_tpm.txt #114
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --pred_out Rice_regression_mean.pred_default.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --threshold 1 --pred_out Rice_regression_mean.pred_thr1.tsv
+mv Rice_regression_mean.pred_default.tsv Rice_regression_mean.pred_thr1.tsv Protein_abundance/
+
+mkdir rice_regression
+for i in {0..113}
+do
+  python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --tpm_col $i --threshold 1 --pred_out Rice_regression_$i.pred_thr1.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Rice_regression_$i.pred_thr1.tsv > rice_regression/Rice_regression_$i.pred_thr1.txt
+  mv Rice_regression_$i.pred_thr1.tsv Oryza_sativa_all_gene_tpm.$i.ridge.coeffs.tsv rice_regression/
+done
+
+python3 join_files.py rice_regression/Rice_regression_{0..113}.pred_thr1.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Oryza_sativa_joined_preds_thr1.txt
+cp CDS/joined_codon_indices/Oryza_sativa_joined_preds_thr1.txt Protein_abundance/
+
+for i in {0..113}
+do
+  python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --tpm_col $i --pred_out Rice_regression_$i.pred_default.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Rice_regression_$i.pred_default.tsv > rice_regression/Rice_regression_$i.pred_default.txt
+  mv Rice_regression_$i.pred_default.tsv Oryza_sativa_all_gene_tpm.$i.ridge.coeffs.tsv rice_regression/
+done
+
+python3 join_files.py rice_regression/Rice_regression_{0..113}.pred_default.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Oryza_sativa_joined_preds_default.txt
+cp CDS/joined_codon_indices/Oryza_sativa_joined_preds_default.txt Protein_abundance/
+
+#####################################
+#After revising the code of codon_exp_regression.py
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --pred_out Protein_abundance/Arab_regression_mean.pred.Deming.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --pred_out Protein_abundance/Rice_regression_mean.pred.Deming.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method pcr --pred_out Protein_abundance/Arab_regression_mean.pred.PCR.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method pcr --pred_out Protein_abundance/Rice_regression_mean.pred.PCR.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method weighted --pred_out Protein_abundance/Arab_regression_mean.pred.W.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method weighted --pred_out Protein_abundance/Rice_regression_mean.pred.W.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method linear --pred_out Protein_abundance/Arab_regression_mean.pred.linear.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method linear --pred_out Protein_abundance/Rice_regression_mean.pred.linear.tsv
+
+#For TPM > 1 filter
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.Deming.thr1.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.Deming.thr1.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method pcr --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.PCR.thr1.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method pcr --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.PCR.thr1.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method weighted --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.W.thr1.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method weighted --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.W.thr1.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method linear --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.linear.thr1.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method linear --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.linear.thr1.tsv
+
+#For ILR (Isometric Log-Ratio), not the default CLR (Centered Log-Ratio)
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --pred_out Protein_abundance/Arab_regression_mean.pred.Deming.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --pred_out Protein_abundance/Rice_regression_mean.pred.Deming.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method pcr --pred_out Protein_abundance/Arab_regression_mean.pred.PCR.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method pcr --pred_out Protein_abundance/Rice_regression_mean.pred.PCR.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method weighted --pred_out Protein_abundance/Arab_regression_mean.pred.W.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method weighted --pred_out Protein_abundance/Rice_regression_mean.pred.W.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method linear --pred_out Protein_abundance/Arab_regression_mean.pred.linear.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method linear --pred_out Protein_abundance/Rice_regression_mean.pred.linear.ilr.tsv
+
+#For TPM > 1 filter
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.Deming.thr1.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.Deming.thr1.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method pcr --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.PCR.thr1.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method pcr --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.PCR.thr1.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method weighted --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.W.thr1.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method weighted --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.W.thr1.ilr.tsv
+
+python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method linear --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.linear.thr1.ilr.tsv
+python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method linear --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.linear.thr1.ilr.tsv
+
+#The simple linear regression without the TPM filter looks the best on the plots generated on R
+#After changing the default regression method to "linear" and the default transformation method to "ilr" in the script
+for i in {0..201}
+do
+  python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --tpm_col $i --pred_out Arab_regression_$i.pred.linear.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Arab_regression_$i.pred.linear.tsv > Arabidopsis_regression/Arab_regression_$i.pred.linear.txt
+  mv Arab_regression_$i.pred.linear.tsv Arabidopsis_thaliana_all_gene_tpm.$i.linear.coeffs.tsv Arabidopsis_regression/
+done
+python3 join_files.py Arabidopsis_regression/Arab_regression_{0..201}.pred.linear.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.linear.txt
+cp CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.linear.txt Protein_abundance/
+
+for i in {0..113}
+do
+  python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --tpm_col $i --pred_out Rice_regression_$i.pred.linear.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Rice_regression_$i.pred.linear.tsv > rice_regression/Rice_regression_$i.pred.linear.txt
+  mv Rice_regression_$i.pred.linear.tsv Oryza_sativa_all_gene_tpm.$i.linear.coeffs.tsv rice_regression/
+done
+python3 join_files.py rice_regression/Rice_regression_{0..113}.pred.linear.txt \
+  --no-prefix --na 0 \
+  > CDS/joined_codon_indices/Oryza_sativa_joined_preds.linear.txt
+cp CDS/joined_codon_indices/Oryza_sativa_joined_preds.linear.txt Protein_abundance/
+
+#Generating the table with known indices and the predicted TPM
+perl -aF"\t" -nle '$output=join("\t",($F[0],@F[65..71])); print "$output";' Protein_abundance/Arabidopsis_thaliana_joined_indices.txt > Protein_abundance/Arabidopsis_thaliana_indicesonly.txt
+awk -F"\t" 'BEGIN{OFS="\t"}{print $1,$4}' Protein_abundance/Arab_regression_mean.pred.linear.ilr.tsv > Protein_abundance/Arab_regression_mean.pred.linear.ilr.txt
+python3 join_files.py Protein_abundance/Arabidopsis_thaliana_indicesonly.txt Protein_abundance/Arab_regression_mean.pred.linear.ilr.txt \
+  --no-prefix --na 0 > Protein_abundance/Arabidopsis_thaliana_indices_pred_TPM.txt
+
+perl -aF"\t" -nle '$output=join("\t",($F[0],@F[65..71])); print "$output";' Protein_abundance/Oryza_sativa_joined_indices.txt > Protein_abundance/Oryza_sativa_indicesonly.txt
+awk -F"\t" 'BEGIN{OFS="\t"}{print $1,$4}' Protein_abundance/Rice_regression_mean.pred.linear.ilr.tsv > Protein_abundance/Rice_regression_mean.pred.linear.ilr.txt
+python3 join_files.py Protein_abundance/Oryza_sativa_indicesonly.txt Protein_abundance/Rice_regression_mean.pred.linear.ilr.txt \
+  --no-prefix --na 0 > Protein_abundance/Oryza_sativa_indices_pred_TPM.txt
+
+#########################################
+#Reevaluation
+rm Arab_regression_mean.pred.*.txt Arab_regression_mean.pred.*.tsv
+for i in linear ridge lasso weighted pcr
+do
+  python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method $i --pred_out Protein_abundance/Arab_regression_mean.pred.$i.tsv
+  python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method $i --threshold 1 --pred_out Protein_abundance/Arab_regression_mean.pred.$i.thr1.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Arab_regression_mean.pred.$i.tsv > Protein_abundance/Arab_regression_mean.pred.$i.txt
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Arab_regression_mean.pred.$i.thr1.tsv > Protein_abundance/Arab_regression_mean.pred.$i.thr1.txt
+done
+
+cd Protein_abundance
+python3 ../join_files.py Arabidopsis_thaliana_indicesonly.txt Arab_regression_mean.pred.linear.txt Arab_regression_mean.pred.linear.thr1.txt Arab_regression_mean.pred.ridge.txt Arab_regression_mean.pred.ridge.thr1.txt Arab_regression_mean.pred.lasso.txt Arab_regression_mean.pred.lasso.thr1.txt Arab_regression_mean.pred.weighted.txt Arab_regression_mean.pred.weighted.thr1.txt Arab_regression_mean.pred.pcr.txt Arab_regression_mean.pred.pcr.thr1.txt --no-prefix --na 0 > Arabidopsis_thaliana_indices_pred_TPM.txt
+
+
+#Laplace-transformed version
+for i in linear ridge lasso weighted pcr
+do
+  python3 codon_exp_regression_beta.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method $i --pred_out Protein_abundance/Arab_regression_laplace_mean.pred.$i.tsv
+  python3 codon_exp_regression_beta.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method $i --threshold 1 --pred_out Protein_abundance/Arab_regression_laplace_mean.pred.$i.thr1.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Arab_regression_laplace_mean.pred.$i.tsv > Protein_abundance/Arab_regression_laplace_mean.pred.$i.txt
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Arab_regression_laplace_mean.pred.$i.thr1.tsv > Protein_abundance/Arab_regression_laplace_mean.pred.$i.thr1.txt
+done
+
+cd Protein_abundance
+python3 ../join_files.py Arabidopsis_thaliana_indicesonly.txt Arab_regression_laplace_mean.pred.linear.txt Arab_regression_laplace_mean.pred.linear.thr1.txt Arab_regression_laplace_mean.pred.ridge.txt Arab_regression_laplace_mean.pred.ridge.thr1.txt Arab_regression_laplace_mean.pred.lasso.txt Arab_regression_laplace_mean.pred.lasso.thr1.txt Arab_regression_laplace_mean.pred.weighted.txt Arab_regression_laplace_mean.pred.weighted.thr1.txt Arab_regression_laplace_mean.pred.pcr.txt Arab_regression_laplace_mean.pred.pcr.thr1.txt --no-prefix --na 0 > Arabidopsis_thaliana_indices_pred_TPM_laplace.txt
+
+
+
+
+#In the comparison of the resulting values, the PCR showed the widest applicability
+#Thr1 did not seem good in this analysis, either
+
+#For each sample
+for i in linear ridge lasso weighted pcr
+do
+  for j in {0..201}
+  do
+    python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt TPM/Arabidopsis_thaliana_all_gene_tpm.txt --method $i --tpm_col $j --pred_out Arab_regression_$j.pred.$i.tsv
+    awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Arab_regression_$j.pred.$i.tsv > Arabidopsis_regression/Arab_regression_$j.pred.$i.txt
+    mv Arab_regression_$j.pred.$i.tsv Arabidopsis_thaliana_all_gene_tpm.$j.$i.coeffs.tsv Arabidopsis_regression/
+  done
+  python3 join_files.py Arabidopsis_regression/Arab_regression_{0..201}.pred.$i.txt \
+    --no-prefix --na 0 \
+    > CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.$i.txt
+  cp CDS/joined_codon_indices/Arabidopsis_thaliana_joined_preds.$i.txt Protein_abundance/
+done
+
+#At home for the above
+for i in linear ridge lasso weighted pcr
+do
+  for j in {0..201}
+  do
+    python3 codon_exp_regression.py Arabidopsis_thaliana_freqonly.txt Arabidopsis_thaliana_all_gene_tpm.txt --method $i --tpm_col $j --pred_out Arab_regression_$j.pred.$i.tsv
+    awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Arab_regression_$j.pred.$i.tsv > Arab_regression_$j.pred.$i.txt
+    #mv Arab_regression_$j.pred.$i.tsv Arabidopsis_thaliana_all_gene_tpm.$j.$i.coeffs.tsv Arabidopsis_regression/
+  done
+  python3 join_files.py Arab_regression_{0..201}.pred.$i.txt \
+    --na 0 \
+    > Arabidopsis_thaliana_joined_preds.$i.txt
+done
+
+#Adding CAI from strongly expressed genes
+perl -MList::Util=sum -F'\t' -ane '
+    $sum{$F[0]} = sum(@F[1..$#F]);
+    END {
+        
+        my @sorted = sort { $sum{$b} <=> $sum{$a} } keys %sum;
+       
+        my $top_n = int(@sorted * 0.05);
+        $top_n = 1 if $top_n < 1;
+        for my $i (0 .. $top_n-1) {
+            #print $sorted[$i], "\t", $sum{$sorted[$i]}, "\n";
+            $genename = $sorted[$i];
+            $genename =~ s/^gene://;
+            print "$genename\t$sum{$sorted[$i]}\n";
+        }
+    }
+' TPM/Arabidopsis_thaliana_all_gene_tpm.txt > Arabidopsis_thaliana_tpm_all_sum_5p.txt
+
+perl -e '
+    open (GF, "< Arabidopsis_thaliana_tpm_all_sum_5p.txt");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        $seqid=~s/ .*//;
+        $seqid=~s/\.\d+$//;
+        $seq =~ s/[>\r\n]//g;
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      if($i !~ /^AT[CM]G/){print ">$i\n$seqdata{$i}\n";}
+    }
+' CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa > CDS/Arabidopsis_thaliana_tpm_all_sum_5p.fa
+
+mkdir Arab_TPM-based_CAI
+cusp -sequence CDS/Arabidopsis_thaliana_tpm_all_sum_5p.fa -outfile CDS/Arabidopsis_thaliana_tpm_all_sum_5p.cu.table
+cai -seqall CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa -cfile CDS/Arabidopsis_thaliana_tpm_all_sum_5p.cu.table -outfile Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_all_sum_5p.cai0.txt
+perl -e '%cai;while($line=<>){$line=~s/\.\d+ CAI: /\t/; $line=~s/^Sequence: /gene:/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){print "$i\t$cai{$i}";}' Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_all_sum_5p.cai0.txt > Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_all_sum_5p.cai.txt
+cp Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_all_sum_5p.cai.txt Protein_abundance/
+
+perl -e '
+   %tpmdata;
+   $linenum=0;
+   @samples;
+   while($line=<>){
+     $linenum++;
+     if($linenum==1){@F=split("\t",$line);@samples=@F;next;}
+     $line=~s/[\r\n]+//g;
+     ($gene,$tpms)=split("\t",$line,2);
+     $gene=~s/^gene://;
+     $tpmdata{$gene}=$tpms;
+   }
+   for $i (1..$#samples){
+     %tpm = ();
+     $outfile= "> Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_5p.".$i.".txt";
+     $valid=0;
+     $pcount=0;
+     for $j (keys %tpmdata){
+       @data = split("\t",$tpmdata{$j});
+       $data[$i-1]=~s/[\r\n]+//g;
+       if($data[$i-1]>0){$tpm{$j}=$data[$i-1];$valid++;}
+     }
+     open(OF, $outfile);
+     print OF "gene\t${samples[$i]}\n";
+     for $j (sort { $tpm{$b} <=> $tpm{$a} } keys %tpm){
+        if (int($valid * 0.05) > $pcount){
+          print OF "$j\t$tpm{$j}\n";
+          $pcount++;
+        } else {
+          last;
+        }
+     }
+     close(OF);
+   }
+' TPM/Arabidopsis_thaliana_all_gene_tpm.txt
+
+for i in Arab_TPM-based_CAI/Arabidopsis_thaliana_tpm_5p.{1..202}.txt
+do
+  outfile1=`echo $i|perl -pe 's/\.txt/.fa/'`
+  outfile2=`echo $i|perl -pe 's/\.txt/.cu.table/'`
+  outfile3=`echo $i|perl -pe 's/\.txt/.cai0.txt/'`
+  outfile4=`echo $i|perl -pe 's/\.txt/.cai.txt/'`
+  perl -se '
+    open (GF, "< $infile");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        $seqid=~s/ .*//;
+        $seqid=~s/\.\d+$//;
+        $seq =~ s/[>\r\n]//g;
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      if($i !~ /^AT[CM]G/){print ">$i\n$seqdata{$i}\n";}
+    }
+  ' -- -infile=$i CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa > $outfile1
+  cusp -sequence $outfile1 -outfile $outfile2
+  cai -seqall CDS/Arabidopsis_thaliana.TAIR10.cds.all.fa -cfile $outfile2 -outfile $outfile3
+  perl -e '%cai;while($line=<>){$line=~s/\.\d+ CAI: /\t/; $line=~s/^Sequence: /gene:/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){print "$i\t$cai{$i}";}' $outfile3 > $outfile4
+done
+
+cd Arab_TPM-based_CAI
+python3 ../join_files.py Arabidopsis_thaliana_tpm_5p.{1..202}.cai.txt \
+    --na 0 \
+    > Arabidopsis_thaliana_joined_tpm_5p.cai.txt
+cp Arabidopsis_thaliana_joined_tpm_5p.cai.txt ../Protein_abundance
+
+cd ../Protein_abundance
+python3 ../join_files.py Arabidopsis_thaliana_indicesonly.txt Arabidopsis_thaliana_tpm_all_sum_5p.cai.txt Arab_regression_mean.pred.linear.txt Arab_regression_mean.pred.linear.thr1.txt Arab_regression_mean.pred.ridge.txt Arab_regression_mean.pred.ridge.thr1.txt Arab_regression_mean.pred.lasso.txt Arab_regression_mean.pred.lasso.thr1.txt Arab_regression_mean.pred.weighted.txt Arab_regression_mean.pred.weighted.thr1.txt Arab_regression_mean.pred.pcr.txt Arab_regression_mean.pred.pcr.thr1.txt --na 0 > Arabidopsis_thaliana_indices_pred_TPM.txt
+
+#For regression from rice TPM data
+rm Rice_regression_mean.pred.*.txt Rice_regression_mean.pred.*.tsv
+for i in linear ridge lasso weighted pcr
+do
+  python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method $i --pred_out Protein_abundance/Rice_regression_mean.pred.$i.tsv
+  python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method $i --threshold 1 --pred_out Protein_abundance/Rice_regression_mean.pred.$i.thr1.tsv
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Rice_regression_mean.pred.$i.tsv > Protein_abundance/Rice_regression_mean.pred.$i.txt
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/Rice_regression_mean.pred.$i.thr1.tsv > Protein_abundance/Rice_regression_mean.pred.$i.thr1.txt
+done
+
+cd Protein_abundance
+python3 ../join_files.py Oryza_sativa_indicesonly.txt Rice_regression_mean.pred.linear.txt Rice_regression_mean.pred.linear.thr1.txt Rice_regression_mean.pred.ridge.txt Rice_regression_mean.pred.ridge.thr1.txt Rice_regression_mean.pred.lasso.txt Rice_regression_mean.pred.lasso.thr1.txt Rice_regression_mean.pred.weighted.txt Rice_regression_mean.pred.weighted.thr1.txt Rice_regression_mean.pred.pcr.txt Rice_regression_mean.pred.pcr.thr1.txt --no-prefix --na 0 > Oryza_sativa_indices_pred_TPM.txt
+
+#In the comparison of the resulting values, the PCR showed the widest applicability
+#Thr1 did not seem good in this analysis, either
+
+#For each sample
+cd ..
+for i in linear ridge lasso weighted pcr
+do
+  for j in {0..113}
+  do
+    python3 codon_exp_regression.py Oryza_sativa_freqonly.txt TPM/Oryza_sativa_all_gene_tpm.txt --method $i --tpm_col $j --pred_out Rice_regression_$j.pred.$i.tsv
+    awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' Rice_regression_$j.pred.$i.tsv > rice_regression/Rice_regression_$j.pred.$i.txt
+    mv Rice_regression_$j.pred.$i.tsv Oryza_sativa_all_gene_tpm.$j.$i.coeffs.tsv rice_regression/
+  done
+  python3 join_files.py rice_regression/Rice_regression_{0..113}.pred.$i.txt \
+    --no-prefix --na 0 \
+    > CDS/joined_codon_indices/Oryza_sativa_joined_preds.$i.txt
+  cp CDS/joined_codon_indices/Oryza_sativa_joined_preds.$i.txt Protein_abundance/
+done
+
+#For CAI from strongly expressed genes in rice
+perl -MList::Util=sum -F'\t' -ane '
+    $sum{$F[0]} = sum(@F[1..$#F]);
+    END {
+        my @sorted = sort { $sum{$b} <=> $sum{$a} } keys %sum;
+        my $top_n = int(@sorted * 0.05);
+        $top_n = 1 if $top_n < 1;
+        for my $i (0 .. $top_n-1) {
+            #print $sorted[$i], "\t", $sum{$sorted[$i]}, "\n";
+            $genename = $sorted[$i];
+            $genename =~ s/^gene://;
+            print "$genename\t$sum{$sorted[$i]}\n";
+        }
+    }
+' TPM/Oryza_sativa_all_gene_tpm.txt > Oryza_sativa_tpm_all_sum_5p.txt
+
+perl -e '
+    open (GF, "< Oryza_sativa_tpm_all_sum_5p.txt");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        $seqid=$1 if $seqid=~/gene:([Os0-9g]+)/;
+        #$seqid=~s/\.\d+$//;
+        $seq =~ s/[>\r\n]//g;
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      if($i =~ /^Os[0-9]+g/){print ">$i\n$seqdata{$i}\n";}
+    }
+' CDS/Oryza_sativa.IRGSP-1.0.cds.all.fa > CDS/Oryza_sativa_tpm_all_sum_5p.fa
+
+cusp -sequence CDS/Oryza_sativa_tpm_all_sum_5p.fa -outfile CDS/Oryza_sativa_tpm_all_sum_5p.cu.table
+cai -seqall CDS/Oryza_sativa.IRGSP-1.0.cds.all.fa -cfile CDS/Oryza_sativa_tpm_all_sum_5p.cu.table -outfile Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_all_sum_5p.cai0.txt
+perl -e '%cai;while($line=<>){$line=~s/\-\d+ CAI: /\t/; $line=~s/^Sequence: /gene:/; $line=~s/Os(\d+)t/Os$1g/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){if($i=~/Os\d+g/){print "$i\t$cai{$i}";}}' Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_all_sum_5p.cai0.txt > Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_all_sum_5p.cai.txt
+cp Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_all_sum_5p.cai.txt Protein_abundance/
+
+perl -e '
+   %tpmdata;
+   $linenum=0;
+   @samples;
+   while($line=<>){
+     $linenum++;
+     if($linenum==1){@F=split("\t",$line);@samples=@F;next;}
+     $line=~s/[\r\n]+//g;
+     ($gene,$tpms)=split("\t",$line,2);
+     $gene=~s/^gene://;
+     $tpmdata{$gene}=$tpms;
+   }
+   for $i (1..$#samples){
+     %tpm = ();
+     $outfile= "> Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_5p.".$i.".txt";
+     $valid=0;
+     $pcount=0;
+     for $j (keys %tpmdata){
+       @data = split("\t",$tpmdata{$j});
+       $data[$i-1]=~s/[\r\n]+//g;
+       if($data[$i-1]>0){$tpm{$j}=$data[$i-1];$valid++;}
+     }
+     open(OF, $outfile);
+     print OF "gene\t${samples[$i]}\n";
+     for $j (sort { $tpm{$b} <=> $tpm{$a} } keys %tpm){
+        if (int($valid * 0.05) > $pcount){
+          print OF "$j\t$tpm{$j}\n";
+          $pcount++;
+        } else {
+          last;
+        }
+     }
+     close(OF);
+   }
+' TPM/Oryza_sativa_all_gene_tpm.txt
+
+for i in Oryza_sativa_TPM-based_CAI/Oryza_sativa_tpm_5p.{1..114}.txt
+do
+  outfile1=`echo $i|perl -pe 's/\.txt/.fa/'`
+  outfile2=`echo $i|perl -pe 's/\.txt/.cu.table/'`
+  outfile3=`echo $i|perl -pe 's/\.txt/.cai0.txt/'`
+  outfile4=`echo $i|perl -pe 's/\.txt/.cai.txt/'`
+  perl -se '
+    open (GF, "< $infile");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        $seqid=$1 if $seqid=~/gene:([Os0-9g]+)/;
+        #$seqid=~s/\.\d+$//;
+        $seq =~ s/[>\r\n]//g;
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      if($i =~ /^Os\d+g/){print ">$i\n$seqdata{$i}\n";}
+    }
+  ' -- -infile=$i CDS/Oryza_sativa.IRGSP-1.0.cds.all.fa > $outfile1
+  cusp -sequence $outfile1 -outfile $outfile2
+  cai -seqall Oryza_sativa.IRGSP-1.0.cds.all.fa -cfile $outfile2 -outfile $outfile3
+  perl -e '%cai;while($line=<>){$line=~s/\-\d+ CAI: /\t/; $line=~s/^Sequence: /gene:/; $line=~s/Os(\d+)t/Os$1g/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){if($i=~/Os\d+g/){print "$i\t$cai{$i}";}}' $outfile3 > $outfile4
+done
+
+cd Oryza_sativa_TPM-based_CAI
+python3 ../join_files.py Oryza_sativa_tpm_5p.{1..114}.cai.txt \
+    --na 0 \
+    > Oryza_sativa_joined_tpm_5p.cai.txt
+cp Oryza_sativa_joined_tpm_5p.cai.txt ../Protein_abundance/
+
+cd ../Protein_abundance
+python3 ../join_files.py Oryza_sativa_indicesonly.txt Oryza_sativa_tpm_all_sum_5p.cai.txt Rice_regression_mean.pred.linear.txt Rice_regression_mean.pred.linear.thr1.txt Rice_regression_mean.pred.ridge.txt Rice_regression_mean.pred.ridge.thr1.txt Rice_regression_mean.pred.lasso.txt Rice_regression_mean.pred.lasso.thr1.txt Rice_regression_mean.pred.weighted.txt Rice_regression_mean.pred.weighted.thr1.txt Rice_regression_mean.pred.pcr.txt Rice_regression_mean.pred.pcr.thr1.txt --na 0 > Oryza_sativa_indices_pred_TPM.txt
+
+#For regression from human and mouse TPM data
+perl -aF"\t" -e 'if($.==1){print "$#F\n"; last;}' TPM/Homo_sapiens_all_gene_tpm.txt #200
+perl -aF"\t" -e 'if($.==1){print "$#F\n"; last;}' TPM/Mus_musculus_all_gene_tpm.txt #43
+perl -aF"\t" -nle '$output=join("\t",@F[0..64]); print "$output";' Protein_abundance/Homo_sapiens_joined_indices.txt > Homo_sapiens_freqonly.txt
+perl -aF"\t" -nle '$output=join("\t",@F[0..64]); print "$output";' Protein_abundance/Mus_musculus_joined_indices.txt > Mus_musculus_freqonly.txt
+cp Homo_sapiens_freqonly.txt Mus_musculus_freqonly.txt Protein_abundance/
+
+for k in Homo_sapiens Mus_musculus; do
+  mkdir ${k}_regression
+  samplenum=0
+  if echo "$k" | grep -q "Homo"; then
+    samplenum=199
+  else
+    samplenum=42
+  fi
+  for i in linear ridge lasso weighted pcr
+  do
+    for j in `seq 0 $samplenum`
+    do
+      python3 codon_exp_regression.py ${k}_freqonly.txt TPM/${k}_all_gene_tpm.txt --method $i --tpm_col $j --pred_out ${k}_regression_$j.pred.$i.tsv
+      awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' ${k}_regression_$j.pred.$i.tsv > ${k}_regression/${k}_regression_$j.pred.$i.txt
+      mv ${k}_regression_$j.pred.$i.tsv ${k}_all_gene_tpm.$j.$i.coeffs.tsv ${k}_regression/
+    done
+    python3 join_files.py \
+      $(for j in $(seq 0 $samplenum); do echo ${k}_regression/${k}_regression_$j.pred.$i.txt; done) \
+      --no-prefix --na 0 \
+      > CDS/joined_codon_indices/${k}_joined_preds.$i.txt
+    cp CDS/joined_codon_indices/${k}_joined_preds.$i.txt Protein_abundance/
+  done
+done
+
+#CAI for human and mouse
+for i in Homo_sapiens Mus_musculus;do
+perl -se '
+  $infile="CDS/Homo_sapiens.GRCh38.cds.all.fa";
+  if($species=~/Mus/){$infile="CDS/Mus_musculus.GRCm39.cds.all.fa";}
+  $/ = ">";
+  %seqdata;
+  open (GF, "< $infile");
+  while ($record=<GF>){
+    ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+    $seqid=$1 if $seqid=~/(gene:EN[MUS]+G\d+)/;
+    $seqid=~s/\.\d+$//;
+    $seq =~ s/[>\r\n]//g;
+    $seqdata{$seqid} = $seq;
+  }
+  close(GF);
+  for $i (sort keys %seqdata){print ">$i\n$seqdata{$i}\n";}
+' -- -species=$i > CDS/$i.cds.all.fa
+done
+
+for i in Homo_sapiens Mus_musculus;do
+  mkdir ${i}_TPM-based_CAI
+  perl -MList::Util=sum -se '
+    while($line=<>){
+      $line=~s/[\r\n]+//g;
+      @F=split("\t",$line);
+      $sum{$F[0]} = sum(@F[1..$#F]);
+    }
+    ($in1,$out1,$out2) = ("CDS/${species}.cds.all.fa","TPM/${species}_tpm_all_sum_5p.txt","CDS/${species}_tpm_all_sum_5p.fa");
+    $/=">";
+    open(IF, "< $in1");
+    %seqdata;
+    while ($record=<IF>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+      $seqid=$1 if $seqid=~/(gene:EN[MUS]+G\d+)/;
+      $seqid=~s/\.\d+$//;
+      $seq =~ s/[>\r\n]//g;
+      $seqdata{$seqid} = $seq;
+    }
+    close(IF);
+    $/="\n";
+    open(OF1, "> $out1");
+    open(OF2, "> $out2");
+    my @sorted = sort { $sum{$b} <=> $sum{$a} } keys %sum;
+    my $top_n = int(@sorted * 0.05);
+    $top_n = 1 if $top_n < 1;
+    for my $i (0 .. $top_n-1) {
+      print OF1 "$sorted[$i]\t$sum{$sorted[$i]}\n";
+      print OF2 ">$sorted[$i]\n$seqdata{$sorted[$i]}\n";
+    }
+  ' -- -species=$i TPM/${i}_all_gene_tpm.txt
+  cusp -sequence CDS/${i}_tpm_all_sum_5p.fa -outfile CDS/${i}_tpm_all_sum_5p.cu.table
+  cai -seqall CDS/${i}.cds.all.fa -cfile CDS/${i}_tpm_all_sum_5p.cu.table -outfile ${i}_TPM-based_CAI/${i}_tpm_all_sum_5p.cai0.txt
+  perl -e '%cai;while($line=<>){$line=~s/ CAI: /\t/; $line=~s/^Sequence: /gene:/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){if($i=~/EN[MUS]+G\d+/){print "$i\t$cai{$i}";}}' ${i}_TPM-based_CAI/${i}_tpm_all_sum_5p.cai0.txt > ${i}_TPM-based_CAI/${i}_tpm_all_sum_5p.cai.txt
+  cp ${i}_TPM-based_CAI/${i}_tpm_all_sum_5p.cai.txt Protein_abundance/
+done
+
+for i in Homo_sapiens Mus_musculus;do
+  perl -se '
+   %tpmdata;
+   $linenum=0;
+   @samples;
+   while($line=<>){
+     $linenum++;
+     $line=~s/[\r\n]+//g;
+     if($linenum==1){@F=split("\t",$line);@samples=@F;next;}
+     ($gene,$tpms)=split("\t",$line,2);
+     $tpmdata{$gene}=$tpms;
+   }
+
+   $inf = "CDS/${species}.cds.all.fa";
+   $/=">";
+   open(IF, "< $inf");
+    %seqdata;
+    while ($record=<IF>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+      $seqid=$1 if $seqid=~/(gene:EN[MUS]+G\d+)/;
+      $seqid=~s/\.\d+$//;
+      $seq =~ s/[>\r\n]//g;
+      $seqdata{$seqid} = $seq;
+    }
+   close(IF);
+   $/="\n";
+
+   for $i (1..$#samples){
+     %tpm = ();
+     $out1 = "> ${species}_TPM-based_CAI/${species}_tpm_5p.${i}.txt";
+     $out2 = "> ${species}_TPM-based_CAI/${species}_tpm_5p.${i}.fa";
+     $valid=0;
+     $pcount=0;
+     for $j (keys %tpmdata){
+       @data = split("\t",$tpmdata{$j});
+       $data[$i-1]=~s/[\r\n]+//g;
+       if($data[$i-1]>0){$tpm{$j}=$data[$i-1];$valid++;}
+     }
+     open(OF1, $out1);
+     open(OF2, $out2);
+     print OF1 "gene\t${samples[$i]}\n";
+     for $j (sort { $tpm{$b} <=> $tpm{$a} } keys %tpm){
+        if (int($valid * 0.05) > $pcount){
+          print OF1 "$j\t$tpm{$j}\n";
+          print OF2 ">$j\n$seqdata{$j}\n";
+          $pcount++;
+        } else {
+          last;
+        }
+     }
+     close(OF);
+   }
+  ' -- -species=$i TPM/${i}_all_gene_tpm.txt
+  samplenum=0
+  if echo "$i" | grep -q "Homo"; then
+    samplenum=200
+  else
+    samplenum=43
+  fi
+  for j in `seq 1 $samplenum`;do
+    outfile1="${i}_TPM-based_CAI/${i}_tpm_5p.${j}.fa"
+    outfile2=`echo $outfile1|perl -pe 's/\.fa$/.cu.table/'`
+    outfile3=`echo $outfile1|perl -pe 's/\.fa$/.cai0.txt/'`
+    outfile4=`echo $outfile1|perl -pe 's/\.fa$/.cai.txt/'`
+    cusp -sequence $outfile1 -outfile $outfile2
+    cai -seqall "CDS/${i}.cds.all.fa" -cfile $outfile2 -outfile $outfile3
+      perl -e '%cai;while($line=<>){$line=~s/ CAI: /\t/; $line=~s/^Sequence: /gene:/; ($seqid,$ccai)=split("\t",$line); $cai{$seqid}=$ccai;} print "gene\tCAI\n"; for $i (sort keys %cai){if($i=~/EN[MUS]+G\d+/){print "$i\t$cai{$i}";}}' $outfile3 > $outfile4
+  done
+  python3 join_files.py \
+    $(for j in $(seq 1 $samplenum); do echo ${i}_TPM-based_CAI/${i}_tpm_5p.${j}.cai.txt; done) \
+    --no-prefix --na 0 \
+    > CDS/joined_codon_indices/${i}_joined_tpm_5p.cai.txt
+  cp CDS/joined_codon_indices/${i}_joined_tpm_5p.cai.txt Protein_abundance/
+done
+
+for k in Homo_sapiens Mus_musculus; do
+  for i in linear ridge lasso weighted pcr
+  do
+    python3 codon_exp_regression.py ${k}_freqonly.txt TPM/${k}_all_gene_tpm.txt --method $i --pred_out Protein_abundance/${k}_regression_mean.pred.$i.tsv
+    python3 codon_exp_regression.py ${k}_freqonly.txt TPM/${k}_all_gene_tpm.txt --method $i --threshold 1 --pred_out Protein_abundance/${k}_regression_mean.pred.$i.thr1.tsv
+    awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/${k}_regression_mean.pred.$i.tsv > Protein_abundance/${k}_regression_mean.pred.$i.txt
+    awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4;}' Protein_abundance/${k}_regression_mean.pred.$i.thr1.tsv > Protein_abundance/${k}_regression_mean.pred.$i.thr1.txt
+  done
+  perl -aF"\t" -nle '$output=join("\t",($F[0],@F[65..71])); print "$output";' Protein_abundance/${k}_joined_indices.txt > Protein_abundance/${k}_indicesonly.txt
+  cd Protein_abundance
+  python3 ../join_files.py ${k}_indicesonly.txt ${k}_tpm_all_sum_5p.cai.txt ${k}_regression_mean.pred.linear.txt ${k}_regression_mean.pred.linear.thr1.txt ${k}_regression_mean.pred.ridge.txt ${k}_regression_mean.pred.ridge.thr1.txt ${k}_regression_mean.pred.lasso.txt ${k}_regression_mean.pred.lasso.thr1.txt ${k}_regression_mean.pred.weighted.txt ${k}_regression_mean.pred.weighted.thr1.txt ${k}_regression_mean.pred.pcr.txt ${k}_regression_mean.pred.pcr.thr1.txt --no-prefix --na 0 > ${k}_indices_pred_TPM.txt
+ cd ..
+done
+
+#For Drosophila, yeast and E. coli
+cd Downloads
+
+for i in Drosophila_melanogaster Saccharomyces_cerevisiae Escherichia_coli; do
+
+  perl -MList::Util=sum -F'\t' -ane '
+    $sum{$F[0]} = sum(@F[1..$#F]);
+    END {
+        my @sorted = sort { $sum{$b} <=> $sum{$a} } keys %sum;
+        my $top_n = int(@sorted * 0.05);
+        $top_n = 1 if $top_n < 1;
+        for my $i (0 .. $top_n-1) {
+            #print $sorted[$i], "\t", $sum{$sorted[$i]}, "\n";
+            $genename = $sorted[$i];
+            $genename =~ s/^gene://;
+            print "$genename\t$sum{$sorted[$i]}\n";
+        }
+    }
+  ' TPM/${i}_all_gene_tpm.txt > ${i}_tpm_all_sum_5p.txt
+
+  perl -se '
+    open (GF, "< ${sp}_tpm_all_sum_5p.txt");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        $seqid=$1 if $seqid=~/gene:([\w\.:-]+) /;
+        $seq =~ s/[>\r\n]//g;
+        #print STDERR "$seqid\n";
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      print ">$i\n$seqdata{$i}\n";
+    }
+  ' -- -sp=$i CDS/${i}*.cds*.fa > CDS/${i}_tpm_all_sum_5p.fa
+
+  cusp -sequence CDS/${i}_tpm_all_sum_5p.fa -outfile CDS/${i}_tpm_all_sum_5p.cu.table
+  cai -seqall CDS/${i}*.cds.all.fa -cfile CDS/${i}_tpm_all_sum_5p.cu.table -outfile Protein_abundance/${i}_tpm_all_sum_5p.cai0.txt
+  perl -se '
+    %gid;
+    open (IF, "Protein_abundance/${sp}_gene_mRNA_pep_ID.txt");
+    while ($line=<IF>){
+      $line=~s/[\r\n]+//g;
+      @F=split("\t",$line);
+      $gid{$F[1]}=$F[0];
+    }
+    close(IF);
+    %cai;
+    while($line=<>){
+      $line=~s/ CAI: /\t/;
+      $line=~s/^Sequence: //;
+      ($seqid,$ccai)=split("\t",$line);
+      if($sp =~ /Escherichia/){$seqid="ENSB:".$seqid;}
+      $cai{$seqid}=$ccai;
+    }
+    print "gene\tCAI\n";
+    for $i (sort keys %cai){
+      %flag;
+      if(!$flag{$gid{$i}}){
+        print "gene:$gid{$i}\t$cai{$i}";
+        $flag{$gid{$i}}++;
+      }
+    }' -- -sp=$i Protein_abundance/${i}_tpm_all_sum_5p.cai0.txt | perl -pe 's/_mRNA//;' > Protein_abundance/${i}_tpm_all_sum_5p.cai.txt
+  cp Protein_abundance/${i}_tpm_all_sum_5p.cai.txt CDS/
+done
+
+#For the other species
+for i in Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica; do
+
+  perl -MList::Util=sum -F'\t' -ane '
+    $sum{$F[0]} = sum(@F[1..$#F]);
+    END {
+        my @sorted = sort { $sum{$b} <=> $sum{$a} } keys %sum;
+        my $top_n = int(@sorted * 0.05);
+        $top_n = 1 if $top_n < 1;
+        for my $i (0 .. $top_n-1) {
+            #print $sorted[$i], "\t", $sum{$sorted[$i]}, "\n";
+            $genename = $sorted[$i];
+            $genename =~ s/^gene://;
+            print "$genename\t$sum{$sorted[$i]}\n";
+        }
+    }
+  ' TPM/${i}_all_gene_tpm.txt > ${i}_tpm_all_sum_5p.txt
+
+  perl -se '
+    open (GF, "< ${sp}_tpm_all_sum_5p.txt");
+    @targets;
+    while($line=<GF>){push(@targets, $1) if $line=~/(.*)\t/}
+    close(GF);
+    $/ = ">";
+    %seqdata;
+    while ($record=<>){
+      ($seqid,$seq)=split(/[\r\n]+/, $record,2);
+        if ($sp !~ /Cenchrus/){
+          $seqid=$1 if $seqid=~/gene:([\w\.:-]+) /;
+        } else {
+          $seqid =~ s/ .*//g;
+        }
+        $seq =~ s/[>\r\n]//g;
+        #print STDERR "$seqid\n";
+        $seqdata{$seqid} = $seq;
+    }
+    for $i (sort @targets){
+      $i =~ s/[\r\n]+//;
+      print ">$i\n$seqdata{$i}\n";
+    }
+  ' -- -sp=$i CDS/${i}*.cds*.fa > CDS/${i}_tpm_all_sum_5p.fa
+
+  cusp -sequence CDS/${i}_tpm_all_sum_5p.fa -outfile CDS/${i}_tpm_all_sum_5p.cu.table
+  cai -seqall CDS/${i}*.cds.all.fa -cfile CDS/${i}_tpm_all_sum_5p.cu.table -outfile Protein_abundance/${i}_tpm_all_sum_5p.cai0.txt
+  perl -se '
+    %gid;
+    open (IF, "CDS/${sp}_gene_mRNA_ID.txt");
+    while ($line=<IF>){
+      $line=~s/[\r\n]+//g;
+      @F=split("\t",$line);
+      if($sp =~ /Malus_/){$F[1] =~ s/mRNA://;}
+      $gid{$F[1]}=$F[0];
+    }
+    close(IF);
+    %cai;
+    while($line=<>){
+      $line=~s/ CAI: /\t/;
+      $line=~s/^Sequence: //;
+      ($seqid,$ccai)=split("\t",$line);
+      if($sp =~ /Escherichia|Mycobacterium|Salmonella/){$seqid="ENSB:".$seqid;}
+      $cai{$seqid}=$ccai;
+    }
+    print "gene\tCAI\n";
+    for $i (sort keys %cai){
+      %flag;
+      if(!$flag{$gid{$i}}){
+        if ($sp !~ /Allium|Cenchrus/){
+          print "gene:$gid{$i}\t$cai{$i}";
+        } else {
+          print "$gid{$i}\t$cai{$i}";
+        }
+        $flag{$gid{$i}}++;
+      }
+    }' -- -sp=$i Protein_abundance/${i}_tpm_all_sum_5p.cai0.txt | perl -pe 's/_mRNA//;' > Protein_abundance/${i}_tpm_all_sum_5p.cai.txt
+  cp Protein_abundance/${i}_tpm_all_sum_5p.cai.txt CDS/
+done
+
+
+#########################################
+#For all the other species
+mkdir pred_all_species
+mkdir coeff_all_species
+mkdir model_all_species
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do
+  for j in  linear ridge lasso weighted pcr
+  do
+    perl -aF"\t" -nle '$output=join("\t",@F[0..64]); print "$output";' CDS/codon_freq_in_CDSs/${i}*codon_freq.txt > ${i}_freqonly.txt
+    python3 codon_exp_regression.py ${i}_freqonly.txt TPM/${i}_all_gene_tpm.txt --method $j --pred_out pred_all_species/${i}_regression_sum.pred.$j.tsv --model_out coeff_all_species/${i}_regression_sum.coeff.$j.tsv --model_pkl model_all_species/${i}_regression_sum.$j.pkl
+    python3 codon_exp_regression.py ${i}_freqonly.txt TPM/${i}_all_gene_tpm.txt --method $j --threshold 1 --pred_out pred_all_species/${i}_regression_sum.pred.$j.thr1.tsv --model_out coeff_all_species/${i}_regression_sum.coeff.$j.thr1.tsv --model_pkl model_all_species/${i}_regression_sum.$j.thr1.pkl
+  done
+done
+
+#To make a file with all the coefficients
+cd coeff_all_species
+header=`perl -aF"\t" -ne 'if($.==1){print "species_thr\t";} else {print "$F[0]\t";}' ${i}_regression_sum.coeff.linear.tsv|perl -pe 's/\t$//;'`
+for i in Oryza_sativa Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Arabidopsis_thaliana Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Saccharomyces_cerevisiae Homo_sapiens Mus_musculus Drosophila_melanogaster Escherichia_coli Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica
+do
+  perl -se '
+    if($species=~/^Oryza/){print "$header\n";}
+    @hitems = split("\t", $header);
+    %coeff;
+    while($line=<>){
+      $line=~s/[\r\n]+//g;
+      $coeff{$1}=$2 if $line=~/([ACGT][ACGT][ACGT])\t(.*)/;
+    }
+    print "${species}_thr0";
+    for $i (1..$#hitems){print "\t$coeff{$hitems[$i]}";}
+    print "\n";
+  ' -- -header="$header" -species=$i ${i}_regression_sum.coeff.linear.tsv
+  perl -se '
+    @hitems = split("\t", $header);
+    %coeff;
+    while($line=<>){
+      $line=~s/[\r\n]+//g;
+      $coeff{$1}=$2 if $line=~/([ACGT][ACGT][ACGT])\t(.*)/;
+    }
+    print "${species}_thr1";
+    for $i (1..$#hitems){print "\t$coeff{$hitems[$i]}";}
+    print "\n";
+  ' -- -header="$header" -species=$i ${i}_regression_sum.coeff.linear.thr1.tsv
+done > all_species_sum.coeff.linear.txt
+
+cp all_species_sum.coeff.linear.txt ../DT_PCA/
+
+#########################################
+#For GC3, CAIhigh and predicted TPM for seven species
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus Drosophila_melanogaster Saccharomyces_cerevisiae Escherichia_coli; do
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' pred_all_species/${i}_regression_sum.pred.linear.tsv > pred_all_species/${i}.pred-only.linear.txt
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$67}' CDS/codon_num_in_CDSs/${i}*.cds.all.fa.codon_num.txt > CDS/codon_num_in_CDSs/${i}.GC3.txt
+  if [ $i == "Arabidopsis_thaliana" ] || [ $i == "Oryza_sativa" ] || [ $i == "Homo_sapiens" ] || [ $i == "Mus_musculus" ]; then
+    python3 join_files.py CDS/codon_num_in_CDSs/${i}.GC3.txt CDS/stAI/${i}.stAI.txt Protein_abundance/${i}_tpm_all_sum_5p.cai.txt pred_all_species/${i}.pred-only.linear.txt --na 0 > Protein_abundance/${i}_GC3_CAIhigh_predTPM.txt
+  else
+    python3 join_files.py CDS/codon_num_in_CDSs/${i}.GC3.txt Protein_abundance/${i}_tpm_all_sum_5p.cai.txt pred_all_species/${i}.pred-only.linear.txt --na 0 > Protein_abundance/${i}_GC3_CAIhigh_predTPM.txt
+  fi
+done
+
+#The header in the resulting files was manually changed to either "gene\tGC3\tstAI\tCAIhigh\tpred.logTPM" or "gene\tGC3\tCAIhigh\tpred.logTPM" 
+
+#For GC3, CAIhigh and predicted TPM for all the other species
+
+for i in Triticum_aestivum Zea_mays Sorghum_bicolor Hordeum_vulgare Cenchrus_americanus Ananas_comosus Musa_acuminata Asparagus_officinalis Allium_cepa Populus_trichocarpa Malus_domestica Vitis_vinifera Citrus_clementina Brassica_rapa Solanum_lycopersicum Glycine_max Chenopodium_quinoa Physcomitrium_patens Chlamydomonas_reinhardtii Bacillus_subtilis Mycobacterium_tuberculosis Salmonella_enterica; do
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$4}' pred_all_species/${i}_regression_sum.pred.linear.tsv > pred_all_species/${i}.pred-only.linear.txt
+  awk -F"\t" 'BEGIN{OFS="\t";}{print $1,$67}' CDS/codon_freq_in_CDSs/${i}*codon_freq.txt > CDS/codon_num_in_CDSs/${i}.GC3.txt
+  python3 join_files.py CDS/codon_num_in_CDSs/${i}.GC3.txt Protein_abundance/${i}_tpm_all_sum_5p.cai.txt pred_all_species/${i}.pred-only.linear.txt --na 0 > Protein_abundance/${i}_GC3_CAIhigh_predTPM.txt
+  perl -i -pe '$. == 1 && s/^.*$/gene\tGC3\tCAIhigh\tpred.logTPM/' Protein_abundance/${i}_GC3_CAIhigh_predTPM.txt
+done
+
+
+#######################################
+#For correlation tests between codon frequencies and TPMs
+cd Arabidopsis_regression
+python3 ../join_files.py \
+    $(for j in $(seq 0 201); do echo Arabidopsis_thaliana_all_gene_tpm.$j.linear.coeffs.tsv; done) \
+     --na 0 > Arabidpsis_thaliana_joined_linear_coeffs.txt
+
+cd ../rice_regression
+python3 ../join_files.py \
+    $(for j in $(seq 0 113); do echo Oryza_sativa_all_gene_tpm.$j.linear.coeffs.tsv; done) \
+     --na 0 > Oryza_sativa_joined_linear_coeffs.txt
+
+cd ../Homo_sapiens_regression
+python3 ../join_files.py \
+    $(for j in $(seq 0 199); do echo Homo_sapiens_all_gene_tpm.$j.linear.coeffs.tsv; done) \
+     --na 0 > Homo_sapiens_joined_linear_coeffs.txt
+
+cd ../Mus_musculus_regression
+python3 ../join_files.py \
+    $(for j in $(seq 0 42); do echo Mus_musculus_all_gene_tpm.$j.linear.coeffs.tsv; done) \
+     --na 0 > Mus_musculus_joined_linear_coeffs.txt
+
+cd ..
+for i in Arabidopsis rice Homo_sapiens Mus_musculus
+do cp ${i}_regression/*_joined_linear_coeffs.txt Protein_abundance/; done
+
+##########################################
+#To finalize the heatmaps
+
+for i in Arabidopsis_thaliana Oryza_sativa Homo_sapiens Mus_musculus; do
+  perl -aF"\t" -nle '@order=(0, 9..$#F, 8, 1..7); $outtxt=join("\t", @F[@order]); print "$outtxt"' ${i}_indices_pred_TPM.txt > ${i}_pred_TPM_indices_sorted.txt
+done
+
+for i in Arabidopsis_thaliana Homo_sapiens Mus_musculus; do
+  perl -F'\t' -anle '
+    if($.==1){
+      # ヘッダー処理
+      for($i=1; $i<@F; $i++){ $F[$i] .= "_mRNA_HL" }
+      print join("\t", @F);
+    } else {
+      # IDの正規化（gene:付与）
+      $F[0] =~ s/^gene://;
+      $F[0] = "gene:" . $F[0];
+      
+      # ★重複排除：すでに出現したIDならスキップ
+      next if $seen{$F[0]}++;
+      
+      print join("\t", @F);
+    }
+  ' ${i}_mRNA_half_lives.txt > ${i}_mRNA_HL_ren.txt
+
+  python3 ../join_files.py ${i}_all_gene_tpm.txt ${i}_mRNA_HL_ren.txt ${i}_protein_abundance.txt --na NA --no-prefix > ${i}_TPM_HL_PA.txt
+done
+
+for i in Oryza_sativa; do
+  python3 ../join_files.py ${i}_all_gene_tpm.txt ${i}_protein_abundance.txt --na NA --no-prefix > ${i}_TPM_PA.txt
+done
+
+
+#########################################
+#Codon optimization
+python3 predict_tpm.py HPT-GFP_before.fa $md/Allium_cepa_regression_sum.linear.thr1.pkl --optimize
+python3 predict_tpm.py HPT-GFP_before.fa $md/Oryza_sativa_regression_sum.linear.thr1.pkl --optimize
+python3 predict_tpm.py HPT-GFP_before.fa $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl --optimize
+python3 predict_tpm.py HPT-GFP_before.fa $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize
+python3 predict_tpm.py HPT-GFP_before.fa $md/Escherichia_coli_regression_sum.linear.thr1.pkl --optimize
+
+#The effect of the optimization is relatively small in rice
+
+python3 predict_tpm.py HPT-GFP_before.fa $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Oryza_sativa_regression_sum.linear.thr1.pkl $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize
+
+python3 predict_tpm.py HPT-GFP_before.fa $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize
+
+python3 predict_tpm.py HPT-GFP_before.fa $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize
+
+python3 predict_tpm.py HPT-GFP_before.fa $md/Escherichia_coli_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize
+
+#Finalization
+python3 predict_tpm.py HPT-GFP_before.fa $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl --optimize --opt_fasta HPT-GFP_onion_Arabidopsis.fa
+python3 predict_tpm.py HPT-GFP_before.fa $md/Escherichia_coli_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl --optimize  --opt_fasta HPT-GFP_yeast_Ecoli.fa
+
+cat HPT-GFP_before.fa HPT-GFP_onion_Arabidopsis.fa HPT-GFP_yeast_Ecoli.fa > HPT-GFP_before_after.fa
+
+#After editing HPT-GFP_before_after.fa
+python3 predict_tpm.py HPT-GFP_before_after.fa $md/Homo_sapiens_regression_sum.linear.thr1.pkl $md/Mus_musculus_regression_sum.linear.thr1.pkl $md/Oryza_sativa_regression_sum.linear.thr1.pkl $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl > HPT-GFP_score_before_after.txt
+
+md="model_all_species"
+python3 predict_tpm.py HPT-GFP_before_after.fa $md/Homo_sapiens_regression_sum.linear.thr1.pkl $md/Mus_musculus_regression_sum.linear.thr1.pkl $md/Oryza_sativa_regression_sum.linear.thr1.pkl $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl > HPT-GFP_score_before_after_w_GFP_GST-HPT-GFP.txt
+
+#HPT-GFP_before_after.fa was manually edited so that GST-fuesd HPT-GFP synthesized and GFP variants (without HPT) can also be used for the TPM prediction
+python3 predict_tpm.py HPT-GFP_before_after.fa $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Brassica_rapa_regression_sum.linear.thr1.pkl $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Oryza_sativa_regression_sum.linear.thr1.pkl $md/Triticum_aestivum_regression_sum.linear.thr1.pkl $md/Homo_sapiens_regression_sum.linear.thr1.pkl $md/Mus_musculus_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl > HPT-GFP_score_before_after_20260520.txt
+
+
+#For picAluc
+md="model_all_species"
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Allium_cepa_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Oryza_sativa_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Arabidopsis_thaliana_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Saccharomyces_cerevisiae_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Escherichia_coli_regression_sum.linear.pkl --optimize
+
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Saccharomyces_cerevisiae_regression_sum.linear.pkl $md/Escherichia_coli_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Arabidopsis_thaliana_regression_sum.linear.pkl $md/Oryza_sativa_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Escherichia_coli_regression_sum.linear.pkl $md/Oryza_sativa_regression_sum.linear.pkl --optimize
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Mus_musculus_regression_sum.linear.pkl $md/Oryza_sativa_regression_sum.linear.pkl --optimize
+
+#Optimization prioritizing the in-vitro transcription-translation, yeast and Arabidopsis
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Escherichia_coli_regression_sum.linear.pkl --optimize --opt_fasta picAluc2E50K_Ecoli.fa
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Mus_musculus_regression_sum.linear.pkl --optimize --opt_fasta picAluc2E50K_mouse.fa
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Triticum_aestivum_regression_sum.linear.pkl --optimize --opt_fasta picAluc2E50K_wheat.fa
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Saccharomyces_cerevisiae_regression_sum.linear.pkl --optimize --opt_fasta picAluc2E50K_yeast.fa
+python3 predict_tpm.py picAluc2E50K_original.fa $md/Arabidopsis_thaliana_regression_sum.linear.pkl --optimize --opt_fasta picAluc2E50K_Athaliana.fa
+
+for i in picAluc2E50K_*.fa; do
+  sp=`echo $i|perl -pe 's/picAluc2E50K_|\.fa//;'`
+  perl -spe 's/ optimized/_$species/;' -- -species=$sp $i
+done > picAluc2E50K.before_after.fa
+
+python3 predict_tpm.py picAluc2E50K.before_after.fa $md/Homo_sapiens_regression_sum.linear.pkl $md/Mus_musculus_regression_sum.linear.pkl $md/Oryza_sativa_regression_sum.linear.pkl  $md/Triticum_aestivum_regression_sum.linear.pkl $md/Arabidopsis_thaliana_regression_sum.linear.pkl $md/Allium_cepa_regression_sum.linear.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.pkl $md/Escherichia_coli_regression_sum.linear.pkl > picAluc2E50K_before_after_score.txt
+
+python3 predict_tpm.py Myc-picAluc2E50K_before_after.fa $md/Arabidopsis_thaliana_regression_sum.linear.thr1.pkl $md/Brassica_rapa_regression_sum.linear.thr1.pkl $md/Allium_cepa_regression_sum.linear.thr1.pkl $md/Oryza_sativa_regression_sum.linear.thr1.pkl $md/Triticum_aestivum_regression_sum.linear.thr1.pkl $md/Homo_sapiens_regression_sum.linear.thr1.pkl $md/Mus_musculus_regression_sum.linear.thr1.pkl $md/Saccharomyces_cerevisiae_regression_sum.linear.thr1.pkl $md/Escherichia_coli_regression_sum.linear.thr1.pkl > picAluc2E50K_before_after_score_20260520.txt
+
+
+
+
